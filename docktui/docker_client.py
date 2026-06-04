@@ -144,6 +144,107 @@ class DockerClient:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return False
 
+    def pause_container(self, container_id: str) -> bool:
+        """Pauses a running container."""
+        if not self.is_docker_installed():
+            return False
+        try:
+            res = self._run([self.docker_bin, "pause", container_id], capture_output=True, check=True)
+            return res.returncode == 0
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return False
+
+    def unpause_container(self, container_id: str) -> bool:
+        """Unpauses a paused container."""
+        if not self.is_docker_installed():
+            return False
+        try:
+            res = self._run([self.docker_bin, "unpause", container_id], capture_output=True, check=True)
+            return res.returncode == 0
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return False
+
+    def top_container(self, container_id: str) -> str:
+        """Shows processes running inside a container."""
+        if not self.is_docker_installed():
+            return "Docker not installed."
+        try:
+            res = self._run(
+                [self.docker_bin, "top", container_id],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8",
+                errors="replace"
+            )
+            return res.stdout or res.stderr or "No process data."
+        except subprocess.TimeoutExpired:
+            return f"Timed out reading container processes after {self.timeout:g} seconds."
+        except Exception as e:
+            return f"Error reading container processes: {str(e)}"
+
+    def get_current_context(self) -> str:
+        """Returns the active Docker context name."""
+        if not self.is_docker_installed():
+            return ""
+        try:
+            res = self._run(
+                [self.docker_bin, "context", "show"],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            return (res.stdout or "").strip()
+        except (subprocess.TimeoutExpired, Exception):
+            return ""
+
+    def list_contexts(self) -> List[Dict[str, str]]:
+        """Retrieves available Docker contexts."""
+        if not self.is_docker_installed():
+            return []
+        cmd = [
+            self.docker_bin, "context", "ls",
+            "--format", "{{.Name}}|{{.Current}}|{{.Description}}|{{.DockerEndpoint}}"
+        ]
+        try:
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            contexts = []
+            for line in res.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 4:
+                    contexts.append({
+                        "name": parts[0],
+                        "current": parts[1],
+                        "description": parts[2],
+                        "endpoint": parts[3],
+                    })
+            return contexts
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return []
+
+    def use_context(self, context_name: str) -> Tuple[bool, str]:
+        """Switches Docker context."""
+        if not self.is_docker_installed():
+            return False, "Docker not installed."
+        try:
+            res = self._run(
+                [self.docker_bin, "context", "use", context_name],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            if res.returncode == 0:
+                return True, f"Switched Docker context to {context_name}."
+            return False, res.stderr or f"Failed to switch Docker context to {context_name}."
+        except subprocess.TimeoutExpired:
+            return False, f"Timed out switching context after {self.timeout:g} seconds."
+        except Exception as e:
+            return False, f"Error switching Docker context: {str(e)}"
+
     def get_logs(self, container_id: str, tail: int = 40) -> str:
         """Fetches the last N log lines of a container."""
         if not self.is_docker_installed():

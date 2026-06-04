@@ -27,5 +27,6 @@ Use this checklist when preparing a GitHub release.
    ```
 
 7. Create a GitHub release from the tag and paste the matching changelog section.
-8. Confirm the `Release` workflow succeeds.
-9. Publish to PyPI through Trusted Publishing or upload manually with Twine.
+8. Confirm the `Release` workflow succeeds and release artifacts are attached.
+
+PyPI publishing is optional. If you decide to publish later, use `docs/publishing.md`.

@@ -1,18 +1,43 @@
 import os
 import sys
 import time
-from typing import List, Dict, Optional
+import signal
+import threading
+from pathlib import Path
+from typing import Callable, List, Dict, Optional
 from .docker_client import DockerClient
 
 # ANSI colors for styling
-RESET = "\033[0m"
-BOLD = "\033[1m"
-CYAN = "\033[36m"
-GREEN = "\033[32m"
-RED = "\033[31m"
-YELLOW = "\033[33m"
-WHITE_ON_BLUE = "\033[37;44m"
-BG_DARK_GRAY = "\033[90m"
+if os.environ.get("NO_COLOR"):
+    RESET = ""
+    BOLD = ""
+    CYAN = ""
+    GREEN = ""
+    RED = ""
+    YELLOW = ""
+    WHITE_ON_BLUE = ""
+    BG_DARK_GRAY = ""
+else:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    YELLOW = "\033[33m"
+    WHITE_ON_BLUE = "\033[37;44m"
+    BG_DARK_GRAY = "\033[90m"
+
+RESIZE_REQUESTED = False
+
+def handle_resize(_signum=None, _frame=None):
+    global RESIZE_REQUESTED
+    RESIZE_REQUESTED = True
+
+if hasattr(signal, "SIGWINCH"):
+    try:
+        signal.signal(signal.SIGWINCH, handle_resize)
+    except Exception:
+        pass
 
 # Cross-platform keyboard input handler
 try:
@@ -28,8 +53,14 @@ try:
                 ch2 = msvcrt.getch()
                 if ch2 == b'H': return "up"
                 if ch2 == b'P': return "down"
+            if ch in (b'\r', b'\n'):
+                return "enter"
+            if ch in (b'\x08', b'\x7f'):
+                return "backspace"
+            if ch == b'\x1b':
+                return "\x1b"
             try:
-                return ch.decode('utf-8').lower()
+                return ch.decode('utf-8')
             except UnicodeDecodeError:
                 return None
         return None
@@ -39,7 +70,7 @@ except ImportError:
     import termios
     import tty
     PLATFORM = "unix"
-    
+
     def init_terminal():
         pass
 
@@ -57,6 +88,14 @@ except ImportError:
                         ch2 = sys.stdin.read(2)
                         if ch2 == '[A': return "up"
                         if ch2 == '[B': return "down"
+                        if ch2.startswith('[M'):
+                            sys.stdin.read(3)
+                            return "mouse"
+                    return "\x1b"
+                if ch in ("\r", "\n"):
+                    return "enter"
+                if ch in ("\x7f", "\b"):
+                    return "backspace"
                 return ch.lower()
             return None
         finally:
@@ -74,6 +113,7 @@ class ContainerDashboard:
         self.images: List[Dict[str, str]] = []
         self.volumes: List[Dict[str, str]] = []
         self.networks: List[Dict[str, str]] = []
+        self.contexts: List[Dict[str, str]] = []
         self.compose_rows: List[Dict[str, object]] = []
         self.active_container: Optional[Dict[str, str]] = None
         self.selected_index = 0
@@ -81,9 +121,10 @@ class ContainerDashboard:
         self.selected_volume_index = 0
         self.selected_network_index = 0
         self.selected_compose_index = 0
-        self.tabs = ["containers", "compose", "images", "volumes", "networks"]
+        self.selected_context_index = 0
+        self.tabs = ["containers", "compose", "images", "volumes", "networks", "contexts"]
         self.current_tab = "containers"
-        self.view_mode = "main"  # 'main', 'logs', 'inspect', 'details', 'system', 'exec', or 'help'
+        self.view_mode = "main"  # 'main', 'logs', 'inspect', 'details', 'top', 'system', 'exec', 'input', or 'help'
         self.previous_view_mode = "main"
         self.status_message = "Welcome to DockTUI! Use Tab or 1/2 keys to switch tabs."
         self.status_time = time.time()
@@ -99,6 +140,8 @@ class ContainerDashboard:
         self.inspect_scroll_index = 0
         self.details_lines: List[str] = []
         self.details_scroll_index = 0
+        self.top_lines: List[str] = []
+        self.top_scroll_index = 0
         self.log_tail_limit = 40
         self.log_lines: List[str] = []
         self.log_scroll_index = 0
@@ -110,13 +153,91 @@ class ContainerDashboard:
         self.exec_history: List[str] = []
         self.exec_presets = ["sh", "bash", "env", "ls -la", "cat /etc/os-release"]
         self.system_info_text = ""
+        self.current_context = ""
         self.daemon_running = False
         self.last_daemon_check = 0.0
         self.daemon_check_interval = 3.0
+        self.data_lock = threading.Lock()
+        self.refresh_requested = threading.Event()
+        self.stop_refresh = threading.Event()
+        self.refresh_thread: Optional[threading.Thread] = None
+        self.refresh_in_progress = False
+        self.input_prompt = ""
+        self.input_buffer = ""
+        self.input_callback: Optional[Callable[[str], None]] = None
+        self.input_cancel_callback: Optional[Callable[[], None]] = None
 
     def set_status(self, msg: str):
         self.status_message = msg
         self.status_time = time.time()
+
+    def request_refresh(self):
+        self.refresh_requested.set()
+
+    def start_refresh_worker(self):
+        if self.refresh_thread and self.refresh_thread.is_alive():
+            return
+        self.stop_refresh.clear()
+        self.refresh_thread = threading.Thread(target=self.refresh_worker, daemon=True)
+        self.refresh_thread.start()
+
+    def stop_refresh_worker(self):
+        self.stop_refresh.set()
+        self.refresh_requested.set()
+        if self.refresh_thread:
+            self.refresh_thread.join(timeout=1.0)
+
+    def refresh_worker(self):
+        while not self.stop_refresh.is_set():
+            self.refresh_requested.wait(timeout=self.refresh_interval)
+            self.refresh_requested.clear()
+            if self.stop_refresh.is_set():
+                break
+            self.refresh_data()
+
+    def start_input(
+        self,
+        prompt: str,
+        callback: Callable[[str], None],
+        cancel_callback: Optional[Callable[[], None]] = None,
+        initial: str = "",
+    ):
+        self.previous_view_mode = self.view_mode
+        self.view_mode = "input"
+        self.input_prompt = prompt
+        self.input_buffer = initial
+        self.input_callback = callback
+        self.input_cancel_callback = cancel_callback
+
+    def cancel_input(self):
+        if self.input_cancel_callback:
+            self.input_cancel_callback()
+        self.input_prompt = ""
+        self.input_buffer = ""
+        self.input_callback = None
+        self.input_cancel_callback = None
+        self.view_mode = self.previous_view_mode or "main"
+
+    def submit_input(self):
+        value = self.input_buffer.strip()
+        callback = self.input_callback
+        self.input_prompt = ""
+        self.input_buffer = ""
+        self.input_callback = None
+        self.input_cancel_callback = None
+        self.view_mode = self.previous_view_mode or "main"
+        if callback:
+            callback(value)
+
+    def handle_input_key(self, key: str):
+        if key == "enter":
+            self.submit_input()
+        elif key in ("\x1b", "q"):
+            self.cancel_input()
+        elif key == "backspace":
+            self.input_buffer = self.input_buffer[:-1]
+        elif len(key) == 1 and key.isprintable():
+            self.input_buffer += key
 
     def is_daemon_running_cached(self, force: bool = False) -> bool:
         """Caches Docker daemon checks so the render loop stays responsive."""
@@ -169,7 +290,7 @@ class ContainerDashboard:
         idx = self.tabs.index(self.current_tab)
         self.current_tab = self.tabs[(idx + offset) % len(self.tabs)]
         self.set_status(f"Switched tab to {self.current_tab}.")
-        self.refresh_data()
+        self.request_refresh()
 
     def current_selected_container(self) -> Optional[Dict[str, str]]:
         if self.current_tab == "containers" and self.containers:
@@ -315,35 +436,94 @@ class ContainerDashboard:
         self.exec_history.insert(0, command)
         self.exec_history = self.exec_history[:10]
 
+    def start_exec_input(self, container: Dict[str, str]):
+        presets = ", ".join(f"{idx + 1}={cmd}" for idx, cmd in enumerate(self.exec_presets))
+        prompt = f"Command inside {container['name']} ({presets}, or custom): "
+
+        def submit(value: str):
+            command = value
+            if value.isdigit():
+                index = int(value) - 1
+                if 0 <= index < len(self.exec_presets):
+                    command = self.exec_presets[index]
+            if not command:
+                self.set_status("Command canceled.")
+                return
+            self.active_container = container
+            self.exec_command_text = command
+            self.record_exec_command(command)
+            self.set_status(f"Running command: {command}...")
+            output = self.client.exec_command(container["id"], command)
+            self.exec_output_lines = output.split("\n")
+            self.exec_scroll_index = 0
+            self.view_mode = "exec"
+
+        self.start_input(prompt, submit)
+
+    def save_lines_to_file(self, lines: List[str], default_name: str):
+        def submit(value: str):
+            filename = value or default_name
+            path = Path(filename)
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            try:
+                path.write_text("\n".join(lines), encoding="utf-8")
+                self.set_status(f"Saved output to {path}.")
+            except Exception as e:
+                self.set_status(f"Save failed: {e}")
+
+        self.start_input(f"Output file [{default_name}]: ", submit, initial=default_name)
+
     def refresh_data(self):
         """Fetches fresh docker data based on active tab."""
+        self.refresh_in_progress = True
+        current_tab = self.current_tab
+        current_context = self.client.get_current_context()
         if self.current_tab in ("containers", "compose"):
-            self.containers = self.sort_containers(self.client.list_containers())
-            self.build_compose_rows()
-            if self.containers:
-                self.stats = self.client.get_container_stats()
-                if self.selected_index >= len(self.containers):
-                    self.selected_index = max(0, len(self.containers) - 1)
-            else:
-                self.stats = {}
-                self.selected_index = 0
-                self.selected_compose_index = 0
-        elif self.current_tab == "images":
-            self.images = self.client.list_images()
-            if self.images:
+            containers = self.sort_containers(self.client.list_containers())
+            stats = self.client.get_container_stats() if containers else {}
+            with self.data_lock:
+                self.current_context = current_context
+                self.containers = containers
+                self.stats = stats
+                self.build_compose_rows()
+                if self.containers:
+                    if self.selected_index >= len(self.containers):
+                        self.selected_index = max(0, len(self.containers) - 1)
+                else:
+                    self.selected_index = 0
+                    self.selected_compose_index = 0
+        elif current_tab == "images":
+            images = self.client.list_images()
+            with self.data_lock:
+                self.current_context = current_context
+                self.images = images
                 if self.selected_image_index >= len(self.images):
                     self.selected_image_index = max(0, len(self.images) - 1)
-            else:
-                self.selected_image_index = 0
-        elif self.current_tab == "volumes":
-            self.volumes = self.client.list_volumes()
-            if self.selected_volume_index >= len(self.volumes):
-                self.selected_volume_index = max(0, len(self.volumes) - 1)
-        elif self.current_tab == "networks":
-            self.networks = self.client.list_networks()
-            if self.selected_network_index >= len(self.networks):
-                self.selected_network_index = max(0, len(self.networks) - 1)
-        self.last_refresh = time.time()
+        elif current_tab == "volumes":
+            volumes = self.client.list_volumes()
+            with self.data_lock:
+                self.current_context = current_context
+                self.volumes = volumes
+                if self.selected_volume_index >= len(self.volumes):
+                    self.selected_volume_index = max(0, len(self.volumes) - 1)
+        elif current_tab == "networks":
+            networks = self.client.list_networks()
+            with self.data_lock:
+                self.current_context = current_context
+                self.networks = networks
+                if self.selected_network_index >= len(self.networks):
+                    self.selected_network_index = max(0, len(self.networks) - 1)
+        elif current_tab == "contexts":
+            contexts = self.client.list_contexts()
+            with self.data_lock:
+                self.current_context = current_context
+                self.contexts = contexts
+                if self.selected_context_index >= len(self.contexts):
+                    self.selected_context_index = max(0, len(self.contexts) - 1)
+        with self.data_lock:
+            self.last_refresh = time.time()
+            self.refresh_in_progress = False
 
     def draw_main_view(self):
         """Renders the main table dashboard view."""
@@ -358,13 +538,14 @@ class ContainerDashboard:
         print("\033[2J\033[H", end="")
 
         # Title block
-        title_text = "DockTUI Container Dashboard"
+        context_text = f" [{self.current_context}]" if self.current_context else ""
+        title_text = f"DockTUI Container Dashboard{context_text}"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
         print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
-        
+
         # Check if Docker is available
         if not self.client.is_docker_installed():
             print(f"\n{RED}{BOLD}Error: Docker CLI not found.{RESET}")
@@ -384,6 +565,7 @@ class ContainerDashboard:
             "images": "Images",
             "volumes": "Volumes",
             "networks": "Networks",
+            "contexts": "Contexts",
         }
         header_parts = []
         for idx, tab in enumerate(self.tabs, start=1):
@@ -425,7 +607,7 @@ class ContainerDashboard:
                 for idx, c in enumerate(self.containers):
                     # Highlight selected row
                     style = WHITE_ON_BLUE if idx == self.selected_index else ""
-                    
+
                     # Format state color
                     state = c["state"]
                     if state == "running":
@@ -450,7 +632,7 @@ class ContainerDashboard:
                 sel = self.containers[self.selected_index]
                 c_id = sel["id"]
                 print(f"\n{CYAN}{BOLD}CONTAINER RESOURCE USAGE:{RESET}")
-                
+
                 c_stats = self.stats.get(c_id) or self.stats.get(sel["name"])
                 if c_stats and sel["state"] == "running":
                     cpu_bar = self.get_percentage_bar(c_stats['cpu'], width=int(width*0.2))
@@ -508,7 +690,7 @@ class ContainerDashboard:
                 # Render list of images
                 for idx, img in enumerate(self.images):
                     style = WHITE_ON_BLUE if idx == self.selected_image_index else ""
-                    
+
                     if idx == self.selected_image_index:
                         repo_str = f"» {img['repository']}"
                     else:
@@ -547,6 +729,25 @@ class ContainerDashboard:
                     print(f"{style}{network['id'][:10]:<12} {self.truncate(marker + network['name'], name_w)} {self.truncate(network['driver'], driver_w)} {network['scope']:<12}{RESET}")
                 print("─" * (width - 1))
 
+        elif self.current_tab == "contexts":
+            if not self.contexts:
+                print(f"\n{CYAN}No Docker contexts found.{RESET}")
+            else:
+                name_w = max(20, int(width * 0.25))
+                desc_w = max(24, int(width * 0.30))
+                endpoint_w = max(24, width - name_w - desc_w - 14)
+                print(f"{BOLD}{self.truncate('CONTEXT', name_w)} {'CUR':<5} {self.truncate('DESCRIPTION', desc_w)} {self.truncate('ENDPOINT', endpoint_w)}{RESET}")
+                print("─" * (width - 1))
+                for idx, context in enumerate(self.contexts):
+                    style = WHITE_ON_BLUE if idx == self.selected_context_index else ""
+                    marker = "» " if idx == self.selected_context_index else "  "
+                    print(
+                        f"{style}{self.truncate(marker + context['name'], name_w)} "
+                        f"{context['current']:<5} {self.truncate(context['description'], desc_w)} "
+                        f"{self.truncate(context['endpoint'], endpoint_w)}{RESET}"
+                    )
+                print("─" * (width - 1))
+
         # Render status line at bottom
         print("\n" + "═" * (width - 1))
         # Clear status message if old
@@ -554,7 +755,7 @@ class ContainerDashboard:
             self.status_message = "Use Tab to switch tabs. Up/Down to navigate."
         print(f"{BOLD}Status:{RESET} {self.status_message}")
         print("═" * (width - 1))
-        
+
         # Action instructions depending on the active tab
         if self.current_tab in ("containers", "compose"):
             print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [O] Sort | [Y] State | [?] Help | [Q] Quit{RESET}")
@@ -562,6 +763,8 @@ class ContainerDashboard:
             print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
         elif self.current_tab == "volumes":
             print(f"{CYAN}[D] Delete Volume | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
+        elif self.current_tab == "contexts":
+            print(f"{CYAN}[U] Use Context | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
         else:
             print(f"{CYAN}[Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
 
@@ -581,7 +784,7 @@ class ContainerDashboard:
 
         sel = self.active_container or self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
-        
+
         # Pull logs if not loaded
         viewport_height = height - 6
         if not self.log_lines:
@@ -597,15 +800,15 @@ class ContainerDashboard:
         title_text = f"LOGS: {sel['name']}{filter_status}{search_status}{error_status}{limit_status}{follow_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
-        
+
         print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
-        
+
         end_idx = min(len(self.log_lines), self.log_scroll_index + viewport_height)
         for i in range(self.log_scroll_index, end_idx):
             print(self.log_lines[i][:width-1])
-            
+
         # Pad with empty lines if viewport not full
         for _ in range(viewport_height - (end_idx - self.log_scroll_index)):
             print("")
@@ -677,11 +880,11 @@ class ContainerDashboard:
 
         sel = self.active_container or self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
-        
+
         title_text = f"INSPECT: {sel['name']} (Line {self.inspect_scroll_index + 1} of {len(self.inspect_lines)})"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
-        
+
         print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
@@ -689,10 +892,10 @@ class ContainerDashboard:
         # Viewport size (lines available for content)
         viewport_height = height - 6
         end_idx = min(len(self.inspect_lines), self.inspect_scroll_index + viewport_height)
-        
+
         for i in range(self.inspect_scroll_index, end_idx):
             print(self.inspect_lines[i][:width-1]) # Trim line width to match viewport width
-            
+
         print("\n" + "═" * (width - 1))
         print(f"{CYAN}[↑/↓] Scroll | [Esc] or [I] Return to dashboard{RESET}")
 
@@ -728,6 +931,61 @@ class ContainerDashboard:
         print("\n" + "═" * (width - 1))
         print(f"{CYAN}[↑/↓] Scroll | [Esc/V] Return to dashboard{RESET}")
 
+    def draw_top_view(self):
+        """Renders docker top output for the active container."""
+        if not self.top_lines:
+            self.view_mode = "main"
+            return
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+            height = max(24, terminal_size.lines)
+        except Exception:
+            width = 80
+            height = 24
+
+        print("\033[2J\033[H", end="")
+        title_text = f"CONTAINER PROCESSES (Line {self.top_scroll_index + 1} of {len(self.top_lines)})"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
+
+        viewport_height = height - 6
+        end_idx = min(len(self.top_lines), self.top_scroll_index + viewport_height)
+        for i in range(self.top_scroll_index, end_idx):
+            print(self.top_lines[i][:width-1])
+        for _ in range(viewport_height - (end_idx - self.top_scroll_index)):
+            print("")
+        print("\n" + "═" * (width - 1))
+        print(f"{CYAN}[↑/↓] Scroll | [O] Output | [Esc/T] Return to dashboard{RESET}")
+
+    def draw_input_view(self):
+        """Renders the previous screen with a non-blocking input prompt."""
+        previous = self.previous_view_mode
+        if previous == "logs":
+            self.draw_logs_view()
+        elif previous == "inspect":
+            self.draw_inspect_view()
+        elif previous == "details":
+            self.draw_details_view()
+        elif previous == "top":
+            self.draw_top_view()
+        elif previous == "system":
+            self.draw_system_view()
+        elif previous == "exec":
+            self.draw_exec_view()
+        else:
+            self.draw_main_view()
+        print(f"\n{YELLOW}{BOLD}{self.input_prompt}{RESET}{self.input_buffer}", end="", flush=True)
+
+    def enable_mouse_tracking(self):
+        print("\033[?1000h", end="", flush=True)
+
+    def disable_mouse_tracking(self):
+        print("\033[?1000l", end="", flush=True)
+
     def draw_system_view(self):
         """Renders the Docker system disk usage and prune view."""
         try:
@@ -737,11 +995,11 @@ class ContainerDashboard:
             width = 80
 
         print("\033[2J\033[H", end="")
-        
+
         title_text = "DOCKER SYSTEM DISK USAGE & CLEANUP"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
-        
+
         print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
@@ -770,11 +1028,11 @@ class ContainerDashboard:
 
         sel = self.active_container or self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
-        
+
         title_text = f"EXEC OUT: {sel['name']} > {self.exec_command_text[:30]} (Line {self.exec_scroll_index + 1} of {len(self.exec_output_lines)})"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
-        
+
         print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
@@ -782,417 +1040,438 @@ class ContainerDashboard:
         # Viewport size (lines available for content)
         viewport_height = height - 6
         end_idx = min(len(self.exec_output_lines), self.exec_scroll_index + viewport_height)
-        
+
         for i in range(self.exec_scroll_index, end_idx):
             print(self.exec_output_lines[i][:width-1])
-            
+
         # Pad with empty lines if not full
         for _ in range(viewport_height - (end_idx - self.exec_scroll_index)):
             print("")
-            
+
         print("\n" + "═" * (width - 1))
         print(f"{CYAN}[↑/↓] Scroll | [R] Run command again | [E] Run different command | [Esc] Return to dashboard{RESET}")
 
     def run(self):
         """The main dashboard control loop."""
+        global RESIZE_REQUESTED
         init_terminal()
-        self.refresh_data()
-        
+        self.enable_mouse_tracking()
+        self.start_refresh_worker()
+        self.request_refresh()
+
         running = True
-        while running:
-            # Query terminal height
-            try:
-                viewport_h = max(24, os.get_terminal_size().lines) - 6
-            except Exception:
-                viewport_h = 18
+        try:
+            while running:
+                # Query terminal height
+                try:
+                    viewport_h = max(24, os.get_terminal_size().lines) - 6
+                except Exception:
+                    viewport_h = 18
 
-            # Render corresponding view
-            if self.view_mode == "main":
-                self.draw_main_view()
-            elif self.view_mode == "logs":
-                self.draw_logs_view()
-            elif self.view_mode == "inspect":
-                self.draw_inspect_view()
-            elif self.view_mode == "details":
-                self.draw_details_view()
-            elif self.view_mode == "system":
-                self.draw_system_view()
-            elif self.view_mode == "exec":
-                self.draw_exec_view()
-            elif self.view_mode == "help":
-                self.draw_help_view()
-
-            # Auto-refresh main dashboard every 2 seconds
-            if self.view_mode == "main" and (time.time() - self.last_refresh > self.refresh_interval):
-                self.refresh_data()
-
-            # Check for keyboard input
-            key = get_key_nonblocking()
-            if key:
-                if self.view_mode == "logs":
-                    if key == "up":
-                        self.log_follow = False
-                        if self.log_scroll_index > 0:
-                            self.log_scroll_index -= 1
-                    elif key == "down":
-                        self.log_follow = False
-                        if self.log_scroll_index < len(self.log_lines) - viewport_h:
-                            self.log_scroll_index += 1
-                    elif key == "g":
-                        self.log_lines = []
-                        self.last_log_refresh = 0.0
-                        self.set_status("Logs refreshed.")
-                    elif key == " ":
-                        self.log_follow = False
-                        self.set_status("Log follow paused.")
-                    elif key == "f":
-                        self.log_follow = not self.log_follow
-                        self.log_lines = []
-                        mode = "enabled" if self.log_follow else "disabled"
-                        self.set_status(f"Log follow mode {mode}.")
-                    elif key == "/":
-                        query = self.prompt_user("Enter search term: ")
-                        self.log_search = query
-                        self.log_filter = query
-                        self.log_match_index = -1
-                        self.log_lines = []
-                    elif key == "n":
-                        self.jump_to_next_log_match(viewport_h)
-                    elif key == "e":
-                        self.log_errors_only = not self.log_errors_only
-                        self.log_lines = []
-                        mode = "enabled" if self.log_errors_only else "disabled"
-                        self.set_status(f"Error-only logs {mode}.")
-                    elif key == "c":
-                        self.log_filter = ""
-                        self.log_search = ""
-                        self.log_errors_only = False
-                        self.log_lines = []
-                        self.set_status("Cleared log filter.")
-                    elif key in ("+", "="):
-                        self.log_tail_limit = min(500, self.log_tail_limit + 10)
-                        self.log_lines = []
-                        self.set_status(f"Increased log limit to {self.log_tail_limit} lines.")
-                    elif key == "-":
-                        self.log_tail_limit = max(10, self.log_tail_limit - 10)
-                        self.log_lines = []
-                        self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
-                    elif key == "?":
-                        self.open_help()
-                    elif key in ("q", "l", "\x1b"):
-                        self.view_mode = "main"
-                elif self.view_mode == "help":
-                    if key in ("?", "q", "\x1b"):
-                        self.close_help()
+                # Render corresponding view
+                if self.view_mode == "main":
+                    self.draw_main_view()
+                elif self.view_mode == "logs":
+                    self.draw_logs_view()
                 elif self.view_mode == "inspect":
-                    if key == "up":
-                        if self.inspect_scroll_index > 0:
-                            self.inspect_scroll_index -= 1
-                    elif key == "down":
-                        # Allow scrolling if there are more lines than the viewport
-                        if self.inspect_scroll_index < len(self.inspect_lines) - viewport_h:
-                            self.inspect_scroll_index += 1
-                    elif key in ("i", "\x1b"):  # 'i' or 'Esc'
-                        self.view_mode = "main"
-                    elif key == "?":
-                        self.open_help()
-                elif self.view_mode == "system":
-                    if key in ("x", "i", "v", "a"):
-                        prune_name = {
-                            "x": "PRUNE",
-                            "i": "IMAGES",
-                            "v": "VOLUMES",
-                            "a": "ALL",
-                        }[key]
-                        prompt = f"Type {prune_name} to confirm prune: "
-                        confirm = self.prompt_user(prompt)
-                        if confirm != prune_name:
-                            self.set_status("Prune canceled.")
-                            continue
-                        self.set_status(f"Running Docker prune ({prune_name})...")
-                        self.draw_system_view()
-                        if key == "i":
-                            prune_out = self.client.prune_images()
-                        elif key == "v":
-                            prune_out = self.client.prune_volumes()
-                        else:
-                            prune_out = self.client.prune_system(include_volumes=(key == "a"))
-                        print("\n" + "─" * 40)
-                        print(prune_out)
-                        print("─" * 40)
-                        self.prompt_user("Prune complete. Press ENTER to continue.")
-                        self.system_info_text = ""
-                        self.refresh_data()
-                    elif key in ("p", "\x1b"):
-                        self.view_mode = "main"
-                    elif key == "?":
-                        self.open_help()
+                    self.draw_inspect_view()
                 elif self.view_mode == "details":
-                    if key == "up":
-                        if self.details_scroll_index > 0:
-                            self.details_scroll_index -= 1
-                    elif key == "down":
-                        if self.details_scroll_index < len(self.details_lines) - viewport_h:
-                            self.details_scroll_index += 1
-                    elif key in ("v", "\x1b"):
-                        self.view_mode = "main"
-                    elif key == "?":
-                        self.open_help()
+                    self.draw_details_view()
+                elif self.view_mode == "top":
+                    self.draw_top_view()
+                elif self.view_mode == "system":
+                    self.draw_system_view()
                 elif self.view_mode == "exec":
-                    if key == "up":
-                        if self.exec_scroll_index > 0:
-                            self.exec_scroll_index -= 1
-                    elif key == "down":
-                        if self.exec_scroll_index < len(self.exec_output_lines) - viewport_h:
-                            self.exec_scroll_index += 1
-                    elif key == "r":
-                        sel = self.active_container or self.current_selected_container()
-                        if sel:
-                            self.set_status(f"Running command: {self.exec_command_text}...")
-                            self.draw_exec_view()
-                            output = self.client.exec_command(sel["id"], self.exec_command_text)
-                            self.exec_output_lines = output.split("\n")
-                            self.exec_scroll_index = 0
-                    elif key == "e":
-                        sel = self.active_container or self.current_selected_container()
-                        if sel:
-                            command = self.prompt_exec_command(sel["name"])
-                            if command:
-                                self.exec_command_text = command
-                                self.record_exec_command(command)
-                                self.set_status(f"Running command: {command}...")
-                                self.draw_exec_view()
-                                output = self.client.exec_command(sel["id"], command)
-                                self.exec_output_lines = output.split("\n")
-                                self.exec_scroll_index = 0
-                    elif key in ("q", "\x1b"):
-                        self.view_mode = "main"
-                    elif key == "?":
-                        self.open_help()
-                else:
-                    # Dashboard controls (main view)
-                    if key == "q":
-                        running = False
-                    elif key == "\t":
-                        self.cycle_tab()
-                    elif key in ("1", "2", "3", "4", "5"):
-                        self.current_tab = self.tabs[int(key) - 1]
-                        self.set_status(f"Switched tab to {self.current_tab}.")
-                        self.refresh_data()
-                    elif key == "\x1b":
-                        running = False
-                    elif key == "up":
-                        if self.current_tab == "containers":
-                            if self.selected_index > 0:
-                                self.selected_index -= 1
-                        elif self.current_tab == "compose":
-                            if self.selected_compose_index > 0:
-                                self.selected_compose_index -= 1
-                        elif self.current_tab == "volumes":
-                            if self.selected_volume_index > 0:
-                                self.selected_volume_index -= 1
-                        elif self.current_tab == "networks":
-                            if self.selected_network_index > 0:
-                                self.selected_network_index -= 1
-                        else:
-                            if self.selected_image_index > 0:
-                                self.selected_image_index -= 1
-                    elif key == "down":
-                        if self.current_tab == "containers":
-                            if self.selected_index < len(self.containers) - 1:
-                                self.selected_index += 1
-                        elif self.current_tab == "compose":
-                            if self.selected_compose_index < len(self.compose_rows) - 1:
-                                self.selected_compose_index += 1
-                        elif self.current_tab == "volumes":
-                            if self.selected_volume_index < len(self.volumes) - 1:
-                                self.selected_volume_index += 1
-                        elif self.current_tab == "networks":
-                            if self.selected_network_index < len(self.networks) - 1:
-                                self.selected_network_index += 1
-                        else:
-                            if self.selected_image_index < len(self.images) - 1:
-                                self.selected_image_index += 1
-                    elif key == "g":
-                        self.set_status("Refreshing data...")
-                        self.refresh_data()
-                    elif key == "?":
-                        self.open_help()
-                    elif key == "/":
-                        query = self.prompt_user("Filter containers (name/image): ")
-                        self.container_filter = query
-                        self.selected_index = 0
-                        self.selected_compose_index = 0
-                        self.set_status(f"Filter set to: '{query}'")
-                        self.refresh_data()
-                    elif key == "c":
-                        self.container_filter = ""
-                        self.selected_index = 0
-                        self.selected_compose_index = 0
-                        self.set_status("Cleared container filter.")
-                        self.refresh_data()
-                    elif key == "o":
-                        modes = ["default", "name", "image", "state"]
-                        self.sort_mode = modes[(modes.index(self.sort_mode) + 1) % len(modes)]
-                        self.set_status(f"Sort mode: {self.sort_mode}.")
-                        self.refresh_data()
-                    elif key == "y":
-                        modes = ["all", "running", "exited", "created"]
-                        self.state_filter = modes[(modes.index(self.state_filter) + 1) % len(modes)]
-                        self.set_status(f"State filter: {self.state_filter}.")
-                        self.refresh_data()
-                    elif key == "p":
-                        self.system_info_text = ""  # Reset system stats on enter
-                        self.view_mode = "system"
-                    elif key == "l" and self.current_tab in ("containers", "compose"):
-                        sel = self.current_selected_container()
-                        if sel:
-                            self.active_container = sel
-                            self.log_filter = ""  # Reset log filter on enter
+                    self.draw_exec_view()
+                elif self.view_mode == "input":
+                    self.draw_input_view()
+                elif self.view_mode == "help":
+                    self.draw_help_view()
+
+                # Auto-refresh main dashboard every 2 seconds
+                if self.view_mode == "main" and (time.time() - self.last_refresh > self.refresh_interval):
+                    self.request_refresh()
+                if RESIZE_REQUESTED:
+                    RESIZE_REQUESTED = False
+                    self.request_refresh()
+
+                # Check for keyboard input
+                key = get_key_nonblocking()
+                if key:
+                    if self.view_mode == "input":
+                        self.handle_input_key(key)
+                        time.sleep(0.08)
+                        continue
+                    if key == "mouse":
+                        self.set_status("Mouse input detected. Use keyboard shortcuts for actions.")
+                        time.sleep(0.08)
+                        continue
+                    key = key.lower() if len(key) == 1 else key
+                    if self.view_mode == "logs":
+                        if key == "up":
+                            self.log_follow = False
+                            if self.log_scroll_index > 0:
+                                self.log_scroll_index -= 1
+                        elif key == "down":
+                            self.log_follow = False
+                            if self.log_scroll_index < len(self.log_lines) - viewport_h:
+                                self.log_scroll_index += 1
+                        elif key == "g":
+                            self.log_lines = []
+                            self.last_log_refresh = 0.0
+                            self.set_status("Logs refreshed.")
+                        elif key == " ":
+                            self.log_follow = False
+                            self.set_status("Log follow paused.")
+                        elif key == "f":
+                            self.log_follow = not self.log_follow
+                            self.log_lines = []
+                            mode = "enabled" if self.log_follow else "disabled"
+                            self.set_status(f"Log follow mode {mode}.")
+                        elif key == "/":
+                            query = self.prompt_user("Enter search term: ")
+                            self.log_search = query
+                            self.log_filter = query
+                            self.log_match_index = -1
+                            self.log_lines = []
+                        elif key == "n":
+                            self.jump_to_next_log_match(viewport_h)
+                        elif key == "e":
+                            self.log_errors_only = not self.log_errors_only
+                            self.log_lines = []
+                            mode = "enabled" if self.log_errors_only else "disabled"
+                            self.set_status(f"Error-only logs {mode}.")
+                        elif key == "c":
+                            self.log_filter = ""
                             self.log_search = ""
                             self.log_errors_only = False
-                            self.log_lines = []   # Force reload logs
-                            self.log_follow = False
-                            self.last_log_refresh = 0.0
-                            self.view_mode = "logs"
-                    elif key == "v" and self.current_tab in ("containers", "compose"):
-                        sel = self.current_selected_container()
-                        if sel:
-                            self.active_container = sel
-                            self.set_status(f"Loading details for {sel['name']}...")
-                            self.draw_main_view()
-                            self.details_lines = self.build_details_lines(sel["id"])
-                            self.details_scroll_index = 0
-                            self.view_mode = "details"
-                    elif key == "i" and self.current_tab in ("containers", "compose"):
-                        sel = self.current_selected_container()
-                        if sel:
-                            self.active_container = sel
-                            self.set_status(f"Inspecting container {sel['name']}...")
-                            self.draw_main_view()
-                            inspect_data = self.client.inspect_container(sel["id"])
-                            self.inspect_lines = inspect_data.split("\n")
-                            self.inspect_scroll_index = 0
-                            self.view_mode = "inspect"
-                    elif key == "e" and self.current_tab in ("containers", "compose"):
-                        sel = self.current_selected_container()
-                        if sel:
-                            if sel["state"] != "running":
-                                self.set_status(f"Error: Container {sel['name']} is not running.")
+                            self.log_lines = []
+                            self.set_status("Cleared log filter.")
+                        elif key in ("+", "="):
+                            self.log_tail_limit = min(500, self.log_tail_limit + 10)
+                            self.log_lines = []
+                            self.set_status(f"Increased log limit to {self.log_tail_limit} lines.")
+                        elif key == "-":
+                            self.log_tail_limit = max(10, self.log_tail_limit - 10)
+                            self.log_lines = []
+                            self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
+                        elif key == "?":
+                            self.open_help()
+                        elif key in ("q", "l", "\x1b"):
+                            self.view_mode = "main"
+                    elif self.view_mode == "help":
+                        if key in ("?", "q", "\x1b"):
+                            self.close_help()
+                    elif self.view_mode == "inspect":
+                        if key == "up":
+                            if self.inspect_scroll_index > 0:
+                                self.inspect_scroll_index -= 1
+                        elif key == "down":
+                            # Allow scrolling if there are more lines than the viewport
+                            if self.inspect_scroll_index < len(self.inspect_lines) - viewport_h:
+                                self.inspect_scroll_index += 1
+                        elif key in ("i", "\x1b"):  # 'i' or 'Esc'
+                            self.view_mode = "main"
+                        elif key == "?":
+                            self.open_help()
+                    elif self.view_mode == "system":
+                        if key in ("x", "i", "v", "a"):
+                            prune_name = {
+                                "x": "PRUNE",
+                                "i": "IMAGES",
+                                "v": "VOLUMES",
+                                "a": "ALL",
+                            }[key]
+                            prompt = f"Type {prune_name} to confirm prune: "
+                            confirm = self.prompt_user(prompt)
+                            if confirm != prune_name:
+                                self.set_status("Prune canceled.")
+                                continue
+                            self.set_status(f"Running Docker prune ({prune_name})...")
+                            self.draw_system_view()
+                            if key == "i":
+                                prune_out = self.client.prune_images()
+                            elif key == "v":
+                                prune_out = self.client.prune_volumes()
                             else:
-                                self.active_container = sel
+                                prune_out = self.client.prune_system(include_volumes=(key == "a"))
+                            print("\n" + "─" * 40)
+                            print(prune_out)
+                            print("─" * 40)
+                            self.prompt_user("Prune complete. Press ENTER to continue.")
+                            self.system_info_text = ""
+                            self.refresh_data()
+                        elif key in ("p", "\x1b"):
+                            self.view_mode = "main"
+                        elif key == "?":
+                            self.open_help()
+                    elif self.view_mode == "details":
+                        if key == "up":
+                            if self.details_scroll_index > 0:
+                                self.details_scroll_index -= 1
+                        elif key == "down":
+                            if self.details_scroll_index < len(self.details_lines) - viewport_h:
+                                self.details_scroll_index += 1
+                        elif key in ("v", "\x1b"):
+                            self.view_mode = "main"
+                        elif key == "?":
+                            self.open_help()
+                    elif self.view_mode == "exec":
+                        if key == "up":
+                            if self.exec_scroll_index > 0:
+                                self.exec_scroll_index -= 1
+                        elif key == "down":
+                            if self.exec_scroll_index < len(self.exec_output_lines) - viewport_h:
+                                self.exec_scroll_index += 1
+                        elif key == "r":
+                            sel = self.active_container or self.current_selected_container()
+                            if sel:
+                                self.set_status(f"Running command: {self.exec_command_text}...")
+                                self.draw_exec_view()
+                                output = self.client.exec_command(sel["id"], self.exec_command_text)
+                                self.exec_output_lines = output.split("\n")
+                                self.exec_scroll_index = 0
+                        elif key == "e":
+                            sel = self.active_container or self.current_selected_container()
+                            if sel:
                                 command = self.prompt_exec_command(sel["name"])
                                 if command:
                                     self.exec_command_text = command
                                     self.record_exec_command(command)
                                     self.set_status(f"Running command: {command}...")
-                                    self.draw_main_view()
+                                    self.draw_exec_view()
                                     output = self.client.exec_command(sel["id"], command)
                                     self.exec_output_lines = output.split("\n")
                                     self.exec_scroll_index = 0
-                                    self.view_mode = "exec"
-                    elif key == "n" and self.current_tab == "containers":
-                        if self.containers:
-                            sel = self.containers[self.selected_index]
-                            new_name = self.prompt_user(f"New name for container {sel['name']}: ")
-                            if new_name:
-                                self.set_status(f"Renaming container {sel['name']} to {new_name}...")
-                                self.draw_main_view()
-                                success, msg = self.client.rename_container(sel["id"], new_name)
-                                if success:
-                                    self.set_status(f"Successfully renamed to {new_name}.")
-                                else:
-                                    self.set_status(f"Rename failed: {msg}")
-                                self.refresh_data()
-                    elif key == "r" and self.current_tab in ("containers", "compose"):
-                        # Attempt to reconnect daemon or restart container
-                        if not self.is_daemon_running_cached(force=True):
-                            self.set_status("Reconnecting to Docker daemon...")
+                        elif key in ("q", "\x1b"):
+                            self.view_mode = "main"
+                        elif key == "?":
+                            self.open_help()
+                    else:
+                        # Dashboard controls (main view)
+                        if key == "q":
+                            running = False
+                        elif key == "\t":
+                            self.cycle_tab()
+                        elif key in ("1", "2", "3", "4", "5"):
+                            self.current_tab = self.tabs[int(key) - 1]
+                            self.set_status(f"Switched tab to {self.current_tab}.")
                             self.refresh_data()
-                        elif not self.containers:
-                            self.set_status("Connected to Docker daemon. Refreshing data...")
+                        elif key == "\x1b":
+                            running = False
+                        elif key == "up":
+                            if self.current_tab == "containers":
+                                if self.selected_index > 0:
+                                    self.selected_index -= 1
+                            elif self.current_tab == "compose":
+                                if self.selected_compose_index > 0:
+                                    self.selected_compose_index -= 1
+                            elif self.current_tab == "volumes":
+                                if self.selected_volume_index > 0:
+                                    self.selected_volume_index -= 1
+                            elif self.current_tab == "networks":
+                                if self.selected_network_index > 0:
+                                    self.selected_network_index -= 1
+                            else:
+                                if self.selected_image_index > 0:
+                                    self.selected_image_index -= 1
+                        elif key == "down":
+                            if self.current_tab == "containers":
+                                if self.selected_index < len(self.containers) - 1:
+                                    self.selected_index += 1
+                            elif self.current_tab == "compose":
+                                if self.selected_compose_index < len(self.compose_rows) - 1:
+                                    self.selected_compose_index += 1
+                            elif self.current_tab == "volumes":
+                                if self.selected_volume_index < len(self.volumes) - 1:
+                                    self.selected_volume_index += 1
+                            elif self.current_tab == "networks":
+                                if self.selected_network_index < len(self.networks) - 1:
+                                    self.selected_network_index += 1
+                            else:
+                                if self.selected_image_index < len(self.images) - 1:
+                                    self.selected_image_index += 1
+                        elif key == "g":
+                            self.set_status("Refreshing data...")
                             self.refresh_data()
-                        elif self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
-                            row = self.compose_rows[self.selected_compose_index]
-                            for container in row["containers"]:  # type: ignore[index]
-                                self.client.restart_container(container["id"])
-                            self.set_status(f"Restarted project {row['project']}.")
+                        elif key == "?":
+                            self.open_help()
+                        elif key == "/":
+                            query = self.prompt_user("Filter containers (name/image): ")
+                            self.container_filter = query
+                            self.selected_index = 0
+                            self.selected_compose_index = 0
+                            self.set_status(f"Filter set to: '{query}'")
                             self.refresh_data()
-                        else:
+                        elif key == "c":
+                            self.container_filter = ""
+                            self.selected_index = 0
+                            self.selected_compose_index = 0
+                            self.set_status("Cleared container filter.")
+                            self.refresh_data()
+                        elif key == "o":
+                            modes = ["default", "name", "image", "state"]
+                            self.sort_mode = modes[(modes.index(self.sort_mode) + 1) % len(modes)]
+                            self.set_status(f"Sort mode: {self.sort_mode}.")
+                            self.refresh_data()
+                        elif key == "y":
+                            modes = ["all", "running", "exited", "created"]
+                            self.state_filter = modes[(modes.index(self.state_filter) + 1) % len(modes)]
+                            self.set_status(f"State filter: {self.state_filter}.")
+                            self.refresh_data()
+                        elif key == "p":
+                            self.system_info_text = ""  # Reset system stats on enter
+                            self.view_mode = "system"
+                        elif key == "l" and self.current_tab in ("containers", "compose"):
                             sel = self.current_selected_container()
-                            if not sel:
-                                continue
-                            self.set_status(f"Restarting container: {sel['name']}...")
-                            self.draw_main_view()
-                            if self.client.restart_container(sel["id"]):
-                                self.set_status(f"Successfully restarted container {sel['name']}.")
-                            else:
-                                self.set_status(f"Failed to restart container {sel['name']}.")
-                            self.refresh_data()
-                    elif key == "s" and self.current_tab in ("containers", "compose"):
-                        if self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
-                            row = self.compose_rows[self.selected_compose_index]
-                            containers = row["containers"]  # type: ignore[index]
-                            any_running = any(c["state"] == "running" for c in containers)
-                            for container in containers:
-                                if any_running and container["state"] == "running":
-                                    self.client.stop_container(container["id"])
-                                elif not any_running:
-                                    self.client.start_container(container["id"])
-                            action = "Stopped" if any_running else "Started"
-                            self.set_status(f"{action} project {row['project']}.")
-                            self.refresh_data()
-                        else:
+                            if sel:
+                                self.active_container = sel
+                                self.log_filter = ""  # Reset log filter on enter
+                                self.log_search = ""
+                                self.log_errors_only = False
+                                self.log_lines = []   # Force reload logs
+                                self.log_follow = False
+                                self.last_log_refresh = 0.0
+                                self.view_mode = "logs"
+                        elif key == "v" and self.current_tab in ("containers", "compose"):
                             sel = self.current_selected_container()
-                            if not sel:
-                                continue
-                            if sel["state"] == "running":
-                                self.set_status(f"Stopping container: {sel['name']}...")
+                            if sel:
+                                self.active_container = sel
+                                self.set_status(f"Loading details for {sel['name']}...")
                                 self.draw_main_view()
-                                if self.client.stop_container(sel["id"]):
-                                    self.set_status(f"Stopped container {sel['name']}.")
-                                else:
-                                    self.set_status(f"Failed to stop container {sel['name']}.")
-                            else:
-                                self.set_status(f"Starting container: {sel['name']}...")
+                                self.details_lines = self.build_details_lines(sel["id"])
+                                self.details_scroll_index = 0
+                                self.view_mode = "details"
+                        elif key == "i" and self.current_tab in ("containers", "compose"):
+                            sel = self.current_selected_container()
+                            if sel:
+                                self.active_container = sel
+                                self.set_status(f"Inspecting container {sel['name']}...")
                                 self.draw_main_view()
-                                if self.client.start_container(sel["id"]):
-                                    self.set_status(f"Started container {sel['name']}.")
+                                inspect_data = self.client.inspect_container(sel["id"])
+                                self.inspect_lines = inspect_data.split("\n")
+                                self.inspect_scroll_index = 0
+                                self.view_mode = "inspect"
+                        elif key == "e" and self.current_tab in ("containers", "compose"):
+                            sel = self.current_selected_container()
+                            if sel:
+                                if sel["state"] != "running":
+                                    self.set_status(f"Error: Container {sel['name']} is not running.")
                                 else:
-                                    self.set_status(f"Failed to start container {sel['name']}.")
-                            self.refresh_data()
-                    elif key == "d" and self.current_tab == "images":
-                        if self.images:
-                            sel_img = self.images[self.selected_image_index]
-                            confirm = self.prompt_user(f"Delete image {sel_img['repository']}:{sel_img['tag']}? (y/n): ")
-                            if confirm.lower() in ("y", "yes"):
-                                self.set_status(f"Deleting image {sel_img['id'][:10]}...")
-                                self.draw_main_view()
-                                success, msg = self.client.remove_image(sel_img["id"])
-                                if success:
-                                    self.set_status(f"Successfully deleted image.")
-                                else:
-                                    # Output clean error dump
-                                    print("\n" + "─" * 40)
-                                    print(f"{RED}Error: {msg}{RESET}")
-                                    print("─" * 40)
-                                    self.prompt_user("Press ENTER to continue.")
+                                    self.active_container = sel
+                                    command = self.prompt_exec_command(sel["name"])
+                                    if command:
+                                        self.exec_command_text = command
+                                        self.record_exec_command(command)
+                                        self.set_status(f"Running command: {command}...")
+                                        self.draw_main_view()
+                                        output = self.client.exec_command(sel["id"], command)
+                                        self.exec_output_lines = output.split("\n")
+                                        self.exec_scroll_index = 0
+                                        self.view_mode = "exec"
+                        elif key == "n" and self.current_tab == "containers":
+                            if self.containers:
+                                sel = self.containers[self.selected_index]
+                                new_name = self.prompt_user(f"New name for container {sel['name']}: ")
+                                if new_name:
+                                    self.set_status(f"Renaming container {sel['name']} to {new_name}...")
+                                    self.draw_main_view()
+                                    success, msg = self.client.rename_container(sel["id"], new_name)
+                                    if success:
+                                        self.set_status(f"Successfully renamed to {new_name}.")
+                                    else:
+                                        self.set_status(f"Rename failed: {msg}")
+                                    self.refresh_data()
+                        elif key == "r" and self.current_tab in ("containers", "compose"):
+                            # Attempt to reconnect daemon or restart container
+                            if not self.is_daemon_running_cached(force=True):
+                                self.set_status("Reconnecting to Docker daemon...")
+                                self.refresh_data()
+                            elif not self.containers:
+                                self.set_status("Connected to Docker daemon. Refreshing data...")
+                                self.refresh_data()
+                            elif self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                                row = self.compose_rows[self.selected_compose_index]
+                                for container in row["containers"]:  # type: ignore[index]
+                                    self.client.restart_container(container["id"])
+                                self.set_status(f"Restarted project {row['project']}.")
                                 self.refresh_data()
                             else:
-                                self.set_status("Deletion canceled.")
-                    elif key == "d" and self.current_tab == "volumes":
-                        if self.volumes:
-                            volume = self.volumes[self.selected_volume_index]
-                            confirm = self.prompt_user(f"Delete volume {volume['name']}? (y/n): ")
-                            if confirm.lower() in ("y", "yes"):
-                                success, msg = self.client.remove_volume(volume["name"])
-                                self.set_status(msg if success else f"Volume delete failed: {msg}")
+                                sel = self.current_selected_container()
+                                if not sel:
+                                    continue
+                                self.set_status(f"Restarting container: {sel['name']}...")
+                                self.draw_main_view()
+                                if self.client.restart_container(sel["id"]):
+                                    self.set_status(f"Successfully restarted container {sel['name']}.")
+                                else:
+                                    self.set_status(f"Failed to restart container {sel['name']}.")
+                                self.refresh_data()
+                        elif key == "s" and self.current_tab in ("containers", "compose"):
+                            if self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                                row = self.compose_rows[self.selected_compose_index]
+                                containers = row["containers"]  # type: ignore[index]
+                                any_running = any(c["state"] == "running" for c in containers)
+                                for container in containers:
+                                    if any_running and container["state"] == "running":
+                                        self.client.stop_container(container["id"])
+                                    elif not any_running:
+                                        self.client.start_container(container["id"])
+                                action = "Stopped" if any_running else "Started"
+                                self.set_status(f"{action} project {row['project']}.")
                                 self.refresh_data()
                             else:
-                                self.set_status("Volume deletion canceled.")
+                                sel = self.current_selected_container()
+                                if not sel:
+                                    continue
+                                if sel["state"] == "running":
+                                    self.set_status(f"Stopping container: {sel['name']}...")
+                                    self.draw_main_view()
+                                    if self.client.stop_container(sel["id"]):
+                                        self.set_status(f"Stopped container {sel['name']}.")
+                                    else:
+                                        self.set_status(f"Failed to stop container {sel['name']}.")
+                                else:
+                                    self.set_status(f"Starting container: {sel['name']}...")
+                                    self.draw_main_view()
+                                    if self.client.start_container(sel["id"]):
+                                        self.set_status(f"Started container {sel['name']}.")
+                                    else:
+                                        self.set_status(f"Failed to start container {sel['name']}.")
+                                self.refresh_data()
+                        elif key == "d" and self.current_tab == "images":
+                            if self.images:
+                                sel_img = self.images[self.selected_image_index]
+                                confirm = self.prompt_user(f"Delete image {sel_img['repository']}:{sel_img['tag']}? (y/n): ")
+                                if confirm.lower() in ("y", "yes"):
+                                    self.set_status(f"Deleting image {sel_img['id'][:10]}...")
+                                    self.draw_main_view()
+                                    success, msg = self.client.remove_image(sel_img["id"])
+                                    if success:
+                                        self.set_status(f"Successfully deleted image.")
+                                    else:
+                                        # Output clean error dump
+                                        print("\n" + "─" * 40)
+                                        print(f"{RED}Error: {msg}{RESET}")
+                                        print("─" * 40)
+                                        self.prompt_user("Press ENTER to continue.")
+                                    self.refresh_data()
+                                else:
+                                    self.set_status("Deletion canceled.")
+                        elif key == "d" and self.current_tab == "volumes":
+                            if self.volumes:
+                                volume = self.volumes[self.selected_volume_index]
+                                confirm = self.prompt_user(f"Delete volume {volume['name']}? (y/n): ")
+                                if confirm.lower() in ("y", "yes"):
+                                    success, msg = self.client.remove_volume(volume["name"])
+                                    self.set_status(msg if success else f"Volume delete failed: {msg}")
+                                    self.refresh_data()
+                                else:
+                                    self.set_status("Volume deletion canceled.")
 
-            # Small sleep to prevent high CPU usage
-            time.sleep(0.08)
-        
-        # Clean shutdown and reset colors
-        print(RESET)
+                    # Small sleep to prevent high CPU usage
+                    time.sleep(0.08)
+        finally:
+            self.stop_refresh_worker()
+            self.disable_mouse_tracking()
+            print(RESET)

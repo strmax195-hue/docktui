@@ -107,6 +107,51 @@ class TestDockerClient(unittest.TestCase):
         self.assertIn("--volumes", mock_run.call_args.args[0])
 
     @patch("subprocess.run")
+    def test_pause_and_unpause_container(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0)
+
+        self.assertTrue(self.client.pause_container("c123"))
+        self.assertIn("pause", mock_run.call_args.args[0])
+        self.assertTrue(self.client.unpause_container("c123"))
+        self.assertIn("unpause", mock_run.call_args.args[0])
+
+    @patch("subprocess.run")
+    def test_top_container(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="PID USER TIME COMMAND\n1 root 0:00 app\n")
+
+        output = self.client.top_container("c123")
+
+        self.assertIn("COMMAND", output)
+
+    @patch("subprocess.run")
+    def test_list_contexts_and_current_context(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="default|*|Current DOCKER_HOST based configuration|unix:///var/run/docker.sock\nremote|||ssh://host\n",
+        )
+
+        contexts = self.client.list_contexts()
+
+        self.assertEqual(contexts[0]["name"], "default")
+        self.assertEqual(contexts[0]["current"], "*")
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="default\n")
+        self.assertEqual(self.client.get_current_context(), "default")
+
+    @patch("subprocess.run")
+    def test_use_context(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="default\n")
+
+        success, msg = self.client.use_context("default")
+
+        self.assertTrue(success)
+        self.assertIn("default", msg)
+
+    @patch("subprocess.run")
     def test_list_images(self, mock_run):
         self.client.docker_bin = "docker"
         mock_stdout = "sha256:123|nginx|latest|142MB\nsha256:456|postgres|15|379MB\n"

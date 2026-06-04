@@ -159,7 +159,7 @@ See [ROADMAP.md](ROADMAP.md) for planned improvements, including richer Compose 
 
 ## Releases
 
-Release notes live in [CHANGELOG.md](CHANGELOG.md). Maintainers can use [docs/release-checklist.md](docs/release-checklist.md) and [docs/publishing.md](docs/publishing.md) when cutting GitHub and PyPI releases.
+Release notes live in [CHANGELOG.md](CHANGELOG.md). Maintainers can use [docs/release-checklist.md](docs/release-checklist.md) when cutting GitHub releases.
 
 ---
 
