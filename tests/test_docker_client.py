@@ -1,0 +1,69 @@
+import unittest
+from unittest.mock import patch, MagicMock
+import subprocess
+from docktui.docker_client import DockerClient
+
+class TestDockerClient(unittest.TestCase):
+    def setUp(self):
+        self.client = DockerClient()
+
+    @patch("shutil.which")
+    def test_is_docker_installed(self, mock_which):
+        mock_which.return_value = "/usr/bin/docker"
+        client = DockerClient()
+        self.assertTrue(client.is_docker_installed())
+
+        mock_which.return_value = None
+        client_none = DockerClient()
+        self.assertFalse(client_none.is_docker_installed())
+
+    @patch("subprocess.run")
+    def test_is_daemon_running(self, mock_run):
+        # Setup docker_bin mock
+        self.client.docker_bin = "docker"
+        
+        # Test success
+        mock_run.return_value = MagicMock(returncode=0)
+        self.assertTrue(self.client.is_daemon_running())
+
+        # Test failure
+        mock_run.return_value = MagicMock(returncode=1)
+        self.assertFalse(self.client.is_daemon_running())
+
+    @patch("subprocess.run")
+    def test_list_containers(self, mock_run):
+        self.client.docker_bin = "docker"
+        
+        # Mock output of 'docker ps -a --format ...'
+        mock_stdout = "c123|web-app|running|Up 2 hours|nginx:alpine\nd456|db-dev|exited|Exited (0) 5m ago|postgres:15\n"
+        mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
+        
+        containers = self.client.list_containers()
+        self.assertEqual(len(containers), 2)
+        
+        self.assertEqual(containers[0]["id"], "c123")
+        self.assertEqual(containers[0]["name"], "web-app")
+        self.assertEqual(containers[0]["state"], "running")
+        self.assertEqual(containers[0]["status"], "Up 2 hours")
+        self.assertEqual(containers[0]["image"], "nginx:alpine")
+
+        self.assertEqual(containers[1]["id"], "d456")
+        self.assertEqual(containers[1]["name"], "db-dev")
+        self.assertEqual(containers[1]["state"], "exited")
+
+    @patch("subprocess.run")
+    def test_get_container_stats(self, mock_run):
+        self.client.docker_bin = "docker"
+        
+        # Mock output of 'docker stats --no-stream ...'
+        mock_stdout = "c123|1.25%|25.4MiB / 7.84GiB|1.2kB / 0B\n"
+        mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
+        
+        stats = self.client.get_container_stats()
+        self.assertIn("c123", stats)
+        self.assertEqual(stats["c123"]["cpu"], "1.25%")
+        self.assertEqual(stats["c123"]["memory"], "25.4MiB / 7.84GiB")
+        self.assertEqual(stats["c123"]["net"], "1.2kB / 0B")
+
+if __name__ == "__main__":
+    unittest.main()

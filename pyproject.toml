@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docktui"
+version = "1.0.0"
+description = "A lightweight, zero-dependency TUI dashboard for managing Docker containers"
+readme = "README.md"
+authors = [
+    { name = "DockTUI Maintainers" }
+]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Monitoring"
+]
+requires-python = ">=3.7"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/yourusername/docktui"
+Bug-Tracker = "https://github.com/yourusername/docktui/issues"
+
+[project.scripts]
+docktui = "docktui.cli:main"
