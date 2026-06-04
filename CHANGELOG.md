@@ -2,7 +2,17 @@
 
 All notable changes to DockTUI are documented here.
 
+## [1.1.0] - 2026-06-04
+
+### Added
+- Clean export of logs, inspect JSON, details, and top views to local files via `O` key.
+- Aggregated project-level logs for Docker Compose groups on the Compose tab.
+- Scroll-wheel mouse support for list and text view navigation.
+- Beautiful boxed empty state screens with helpful CLI tips for all tabs.
+- Integrated container processes view (`docker top`) via `T` key.
+
 ## [1.0.0] - 2026-06-04
+
 
 ### Added
 - Containers dashboard with start, stop, restart, inspect, logs, exec, rename, and filtering workflows.

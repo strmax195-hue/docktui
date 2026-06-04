@@ -277,5 +277,28 @@ class TestDockerClient(unittest.TestCase):
 
         self.assertIn("Timed out reading logs", output)
 
+    @patch("subprocess.run")
+    def test_get_compose_project_logs_success(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="compose-logs-output\n")
+
+        output = self.client.get_compose_project_logs("myproject", tail=50)
+
+        self.assertEqual(output, "compose-logs-output\n")
+        self.assertEqual(
+            mock_run.call_args.args[0],
+            ["docker", "compose", "-p", "myproject", "logs", "--tail=50"]
+        )
+
+    @patch("subprocess.run")
+    def test_get_compose_project_logs_timeout(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["docker", "compose"], timeout=10)
+
+        output = self.client.get_compose_project_logs("myproject")
+
+        self.assertIn("Timed out reading Compose logs", output)
+
 if __name__ == "__main__":
     unittest.main()
+

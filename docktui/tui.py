@@ -88,8 +88,14 @@ except ImportError:
                         ch2 = sys.stdin.read(2)
                         if ch2 == '[A': return "up"
                         if ch2 == '[B': return "down"
-                        if ch2.startswith('[M'):
-                            sys.stdin.read(3)
+                        if ch2 == '[M':
+                            mouse_data = sys.stdin.read(3)
+                            if len(mouse_data) == 3:
+                                cb = ord(mouse_data[0])
+                                if cb == 96:
+                                    return "scroll_up"
+                                if cb == 97:
+                                    return "scroll_down"
                             return "mouse"
                     return "\x1b"
                 if ch in ("\r", "\n"):
@@ -154,6 +160,7 @@ class ContainerDashboard:
         self.exec_presets = ["sh", "bash", "env", "ls -la", "cat /etc/os-release"]
         self.system_info_text = ""
         self.current_context = ""
+        self.active_project: Optional[str] = None
         self.daemon_running = False
         self.last_daemon_check = 0.0
         self.daemon_check_interval = 3.0
@@ -166,6 +173,80 @@ class ContainerDashboard:
         self.input_buffer = ""
         self.input_callback: Optional[Callable[[str], None]] = None
         self.input_cancel_callback: Optional[Callable[[], None]] = None
+
+    def export_logs_to_file(self, filepath: str):
+        self._export_lines_to_file(self.log_lines, "Logs", filepath)
+
+    def export_inspect_to_file(self, filepath: str):
+        self._export_lines_to_file(self.inspect_lines, "Inspect JSON", filepath)
+
+    def export_details_to_file(self, filepath: str):
+        self._export_lines_to_file(self.details_lines, "Details", filepath)
+
+    def export_top_to_file(self, filepath: str):
+        self._export_lines_to_file(self.top_lines, "Processes", filepath)
+
+    def _export_lines_to_file(self, lines: List[str], type_name: str, filepath: str):
+        if not filepath:
+            self.set_status("Export canceled: empty path.")
+            return
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            self.set_status(f"{type_name} successfully exported to {filepath}")
+        except Exception as e:
+            self.set_status(f"Failed to export {type_name.lower()}: {str(e)}")
+
+    def draw_empty_state(self, tab_name: str, width: int):
+        """Draws a beautiful boxed empty state with tips for the current tab."""
+        box_w = min(60, width - 4)
+        padding = (width - box_w) // 2
+        margin = " " * padding
+
+        tips = {
+            "containers": [
+                "No containers found.",
+                "To run a new container, try:",
+                f"{YELLOW}docker run -d --name test-nginx -p 8080:80 nginx{RESET}",
+            ],
+            "compose": [
+                "No Docker Compose projects found.",
+                "To start a compose project, run in your project dir:",
+                f"{YELLOW}docker compose up -d{RESET}",
+            ],
+            "images": [
+                "No local images found.",
+                "To pull a new image, try:",
+                f"{YELLOW}docker pull alpine:latest{RESET}",
+            ],
+            "volumes": [
+                "No volumes found.",
+                "To create a volume, try:",
+                f"{YELLOW}docker volume create my-data{RESET}",
+            ],
+            "networks": [
+                "No networks found.",
+                "To create a network, try:",
+                f"{YELLOW}docker network create my-net{RESET}",
+            ],
+            "contexts": [
+                "No Docker contexts found.",
+                "To list contexts manually, run:",
+                f"{YELLOW}docker context ls{RESET}",
+            ]
+        }
+
+        content = tips.get(tab_name, ["Nothing to display."])
+        
+        print("\n")
+        print(margin + f"{CYAN}┌" + "─" * (box_w - 2) + f"┐{RESET}")
+        for line in content:
+            # Strip ANSI escape codes when calculating length for padding
+            visible_len = len(line.replace(YELLOW, "").replace(RESET, "").replace(CYAN, ""))
+            pad_r = box_w - 4 - visible_len
+            print(margin + f"{CYAN}│{RESET}  {line}" + " " * pad_r + f" {CYAN}│{RESET}")
+        print(margin + f"{CYAN}└" + "─" * (box_w - 2) + f"┘{RESET}")
+        print("\n")
 
     def set_status(self, msg: str):
         self.status_message = msg
@@ -345,9 +426,12 @@ class ContainerDashboard:
         if self.selected_compose_index >= len(self.compose_rows):
             self.selected_compose_index = max(0, len(self.compose_rows) - 1)
 
-    def load_log_lines(self, container_id: str, viewport_height: int, follow: bool = False):
+    def load_log_lines(self, container_id: Optional[str], viewport_height: int, follow: bool = False):
         """Loads logs and keeps the viewport pinned to the bottom in follow mode."""
-        raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit)
+        if container_id is None and self.active_project:
+            raw_logs = self.client.get_compose_project_logs(self.active_project, tail=self.log_tail_limit)
+        else:
+            raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit)
         log_lines = raw_logs.split("\n")
         if self.log_errors_only:
             log_lines = [
@@ -585,12 +669,11 @@ class ContainerDashboard:
         # Render corresponding Tab Grid
         if self.current_tab == "containers":
             if not self.containers:
-                print(f"\n{CYAN}No Docker containers found on this system.{RESET}")
                 if self.container_filter:
-                    print(f"No containers match the active filter: '{self.container_filter}'")
+                    print(f"\n{CYAN}No containers match the active filter: '{self.container_filter}'{RESET}")
                     print("Press [C] to clear the filter.")
                 else:
-                    print("Create some containers using 'docker run' to see them here.")
+                    self.draw_empty_state("containers", width)
             else:
                 # Calculate column widths dynamically based on terminal width
                 rem = width - 26
@@ -646,8 +729,7 @@ class ContainerDashboard:
 
         elif self.current_tab == "compose":
             if not self.compose_rows:
-                print(f"\n{CYAN}No Docker Compose containers found.{RESET}")
-                print("Standalone containers are shown under the '(standalone)' group when available.")
+                self.draw_empty_state("compose", width)
             else:
                 service_w = max(18, int(width * 0.25))
                 name_w = max(18, int(width * 0.25))
@@ -673,8 +755,7 @@ class ContainerDashboard:
 
         elif self.current_tab == "images":
             if not self.images:
-                print(f"\n{CYAN}No local Docker images found on this system.{RESET}")
-                print("Run 'docker pull' to fetch images.")
+                self.draw_empty_state("images", width)
             else:
                 # Calculate column widths dynamically based on terminal width
                 rem = width - 26
@@ -702,7 +783,7 @@ class ContainerDashboard:
 
         elif self.current_tab == "volumes":
             if not self.volumes:
-                print(f"\n{CYAN}No Docker volumes found on this system.{RESET}")
+                self.draw_empty_state("volumes", width)
             else:
                 name_w = max(30, int(width * 0.50))
                 driver_w = max(12, int(width * 0.20))
@@ -716,7 +797,7 @@ class ContainerDashboard:
 
         elif self.current_tab == "networks":
             if not self.networks:
-                print(f"\n{CYAN}No Docker networks found on this system.{RESET}")
+                self.draw_empty_state("networks", width)
             else:
                 id_w = 12
                 name_w = max(30, int(width * 0.45))
@@ -731,7 +812,7 @@ class ContainerDashboard:
 
         elif self.current_tab == "contexts":
             if not self.contexts:
-                print(f"\n{CYAN}No Docker contexts found.{RESET}")
+                self.draw_empty_state("contexts", width)
             else:
                 name_w = max(20, int(width * 0.25))
                 desc_w = max(24, int(width * 0.30))
@@ -770,34 +851,32 @@ class ContainerDashboard:
 
     def draw_logs_view(self):
         """Renders the fullscreen log viewer screen."""
-        if not self.containers:
-            self.view_mode = "main"
-            return
+        if self.active_project:
+            log_title = f"PROJECT LOGS: {self.active_project}"
+            target_id = None
+        else:
+            sel = self.active_container or (self.containers[self.selected_index] if self.containers else None)
+            if not sel:
+                self.view_mode = "main"
+                return
+            log_title = f"LOGS: {sel['name']}"
+            target_id = sel["id"]
 
-        try:
-            terminal_size = os.get_terminal_size()
-            width = max(80, terminal_size.columns)
-            height = max(24, terminal_size.lines)
-        except Exception:
-            width = 80
-            height = 24
-
-        sel = self.active_container or self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
 
         # Pull logs if not loaded
         viewport_height = height - 6
         if not self.log_lines:
-            self.load_log_lines(sel["id"], viewport_height, follow=True)
+            self.load_log_lines(target_id, viewport_height, follow=True)
         elif self.log_follow and time.time() - self.last_log_refresh >= self.refresh_interval:
-            self.load_log_lines(sel["id"], viewport_height, follow=True)
+            self.load_log_lines(target_id, viewport_height, follow=True)
 
         filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
         search_status = f" [SEARCH: {self.log_search}]" if self.log_search else ""
         error_status = " [ERRORS]" if self.log_errors_only else ""
         limit_status = f" [LIMIT: {self.log_tail_limit} lines]"
         follow_status = " [FOLLOW]" if self.log_follow else ""
-        title_text = f"LOGS: {sel['name']}{filter_status}{search_status}{error_status}{limit_status}{follow_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
+        title_text = f"{log_title}{filter_status}{search_status}{error_status}{limit_status}{follow_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
 
@@ -814,7 +893,7 @@ class ContainerDashboard:
             print("")
 
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[↑/↓] Scroll | [F] Follow | [Space] Pause | [/] Search | [N] Next | [E] Errors | [+/-] Limit | [?] Help | [Esc/L] Back{RESET}")
+        print(f"{CYAN}[↑/↓] Scroll | [F] Follow | [Space] Pause | [/] Search | [N] Next | [E] Errors | [O] Export | [+/-] Limit | [?] Help | [Esc/L] Back{RESET}")
 
     def draw_help_view(self):
         """Renders a compact keyboard help screen."""
@@ -834,18 +913,19 @@ class ContainerDashboard:
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}\n")
         print(f"{BOLD}Global{RESET}")
         print("  Tab / 1-5    Switch tabs")
-        print("  Up / Down    Move selection or scroll")
+        print("  Up / Down    Move selection or scroll / Mouse scroll support")
         print("  G            Refresh current data")
         print("  ?            Open or close this help screen")
         print("  Q / Esc      Quit or return to the previous screen\n")
         print(f"{BOLD}Containers{RESET}")
-        print("  S            Start or stop selected container")
-        print("  R            Restart selected container or reconnect")
-        print("  L            Open logs")
+        print("  S            Start or stop selected container / project")
+        print("  R            Restart selected container / project")
+        print("  L            Open logs (or Compose project logs)")
         print("  I            Inspect container JSON")
         print("  E            Execute command in running container")
         print("  N            Rename selected container")
         print("  V            Open readable container details")
+        print("  T            View container processes (docker top)")
         print("  O / Y        Cycle sorting and state filters")
         print("  / / C        Apply or clear container filter\n")
         print(f"{BOLD}Logs{RESET}")
@@ -855,6 +935,7 @@ class ContainerDashboard:
         print("  E            Toggle error/warning-only lines")
         print("  + / -        Increase or decrease log tail limit")
         print("  / / C        Apply or clear log filter")
+        print("  O            Export logs to a local file")
         print("  G            Refresh logs now\n")
         print(f"{BOLD}Images and cleanup{RESET}")
         print("  D            Delete selected image")
@@ -897,7 +978,7 @@ class ContainerDashboard:
             print(self.inspect_lines[i][:width-1]) # Trim line width to match viewport width
 
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[↑/↓] Scroll | [Esc] or [I] Return to dashboard{RESET}")
+        print(f"{CYAN}[↑/↓] Scroll | [O] Export | [Esc] or [I] Return to dashboard{RESET}")
 
     def draw_details_view(self):
         """Renders a human-friendly container details screen."""
@@ -929,7 +1010,7 @@ class ContainerDashboard:
             print("")
 
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[↑/↓] Scroll | [Esc/V] Return to dashboard{RESET}")
+        print(f"{CYAN}[↑/↓] Scroll | [O] Export | [Esc/V] Return to dashboard{RESET}")
 
     def draw_top_view(self):
         """Renders docker top output for the active container."""
@@ -959,7 +1040,7 @@ class ContainerDashboard:
         for _ in range(viewport_height - (end_idx - self.top_scroll_index)):
             print("")
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[↑/↓] Scroll | [O] Output | [Esc/T] Return to dashboard{RESET}")
+        print(f"{CYAN}[↑/↓] Scroll | [O] Export | [Esc/T] Return to dashboard{RESET}")
 
     def draw_input_view(self):
         """Renders the previous screen with a non-blocking input prompt."""
@@ -1103,19 +1184,19 @@ class ContainerDashboard:
                         time.sleep(0.08)
                         continue
                     if key == "mouse":
-                        self.set_status("Mouse input detected. Use keyboard shortcuts for actions.")
+                        self.set_status("Mouse click detected. Scroll to navigate list/logs.")
                         time.sleep(0.08)
                         continue
                     key = key.lower() if len(key) == 1 else key
                     if self.view_mode == "logs":
-                        if key == "up":
+                        if key in ("up", "scroll_up"):
                             self.log_follow = False
-                            if self.log_scroll_index > 0:
-                                self.log_scroll_index -= 1
-                        elif key == "down":
+                            delta = 3 if key == "scroll_up" else 1
+                            self.log_scroll_index = max(0, self.log_scroll_index - delta)
+                        elif key in ("down", "scroll_down"):
                             self.log_follow = False
-                            if self.log_scroll_index < len(self.log_lines) - viewport_h:
-                                self.log_scroll_index += 1
+                            delta = 3 if key == "scroll_down" else 1
+                            self.log_scroll_index = max(0, min(self.log_scroll_index + delta, len(self.log_lines) - viewport_h))
                         elif key == "g":
                             self.log_lines = []
                             self.last_log_refresh = 0.0
@@ -1157,19 +1238,23 @@ class ContainerDashboard:
                             self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
                         elif key == "?":
                             self.open_help()
+                        elif key == "o":
+                            self.log_follow = False
+                            self.start_input("Export logs to path: ", self.export_logs_to_file)
                         elif key in ("q", "l", "\x1b"):
                             self.view_mode = "main"
                     elif self.view_mode == "help":
                         if key in ("?", "q", "\x1b"):
                             self.close_help()
                     elif self.view_mode == "inspect":
-                        if key == "up":
-                            if self.inspect_scroll_index > 0:
-                                self.inspect_scroll_index -= 1
-                        elif key == "down":
-                            # Allow scrolling if there are more lines than the viewport
-                            if self.inspect_scroll_index < len(self.inspect_lines) - viewport_h:
-                                self.inspect_scroll_index += 1
+                        if key in ("up", "scroll_up"):
+                            delta = 3 if key == "scroll_up" else 1
+                            self.inspect_scroll_index = max(0, self.inspect_scroll_index - delta)
+                        elif key in ("down", "scroll_down"):
+                            delta = 3 if key == "scroll_down" else 1
+                            self.inspect_scroll_index = max(0, min(self.inspect_scroll_index + delta, len(self.inspect_lines) - viewport_h))
+                        elif key == "o":
+                            self.start_input("Export inspect JSON to path: ", self.export_inspect_to_file)
                         elif key in ("i", "\x1b"):  # 'i' or 'Esc'
                             self.view_mode = "main"
                         elif key == "?":
@@ -1206,23 +1291,38 @@ class ContainerDashboard:
                         elif key == "?":
                             self.open_help()
                     elif self.view_mode == "details":
-                        if key == "up":
-                            if self.details_scroll_index > 0:
-                                self.details_scroll_index -= 1
-                        elif key == "down":
-                            if self.details_scroll_index < len(self.details_lines) - viewport_h:
-                                self.details_scroll_index += 1
+                        if key in ("up", "scroll_up"):
+                            delta = 3 if key == "scroll_up" else 1
+                            self.details_scroll_index = max(0, self.details_scroll_index - delta)
+                        elif key in ("down", "scroll_down"):
+                            delta = 3 if key == "scroll_down" else 1
+                            self.details_scroll_index = max(0, min(self.details_scroll_index + delta, len(self.details_lines) - viewport_h))
+                        elif key == "o":
+                            self.start_input("Export details to path: ", self.export_details_to_file)
                         elif key in ("v", "\x1b"):
                             self.view_mode = "main"
                         elif key == "?":
                             self.open_help()
+                    elif self.view_mode == "top":
+                        if key in ("up", "scroll_up"):
+                            delta = 3 if key == "scroll_up" else 1
+                            self.top_scroll_index = max(0, self.top_scroll_index - delta)
+                        elif key in ("down", "scroll_down"):
+                            delta = 3 if key == "scroll_down" else 1
+                            self.top_scroll_index = max(0, min(self.top_scroll_index + delta, len(self.top_lines) - viewport_h))
+                        elif key == "o":
+                            self.start_input("Export processes to path: ", self.export_top_to_file)
+                        elif key in ("t", "q", "\x1b"):
+                            self.view_mode = "main"
+                        elif key == "?":
+                            self.open_help()
                     elif self.view_mode == "exec":
-                        if key == "up":
-                            if self.exec_scroll_index > 0:
-                                self.exec_scroll_index -= 1
-                        elif key == "down":
-                            if self.exec_scroll_index < len(self.exec_output_lines) - viewport_h:
-                                self.exec_scroll_index += 1
+                        if key in ("up", "scroll_up"):
+                            delta = 3 if key == "scroll_up" else 1
+                            self.exec_scroll_index = max(0, self.exec_scroll_index - delta)
+                        elif key in ("down", "scroll_down"):
+                            delta = 3 if key == "scroll_down" else 1
+                            self.exec_scroll_index = max(0, min(self.exec_scroll_index + delta, len(self.exec_output_lines) - viewport_h))
                         elif key == "r":
                             sel = self.active_container or self.current_selected_container()
                             if sel:
@@ -1259,7 +1359,7 @@ class ContainerDashboard:
                             self.refresh_data()
                         elif key == "\x1b":
                             running = False
-                        elif key == "up":
+                        elif key in ("up", "scroll_up"):
                             if self.current_tab == "containers":
                                 if self.selected_index > 0:
                                     self.selected_index -= 1
@@ -1272,10 +1372,13 @@ class ContainerDashboard:
                             elif self.current_tab == "networks":
                                 if self.selected_network_index > 0:
                                     self.selected_network_index -= 1
+                            elif self.current_tab == "contexts":
+                                if self.selected_context_index > 0:
+                                    self.selected_context_index -= 1
                             else:
                                 if self.selected_image_index > 0:
                                     self.selected_image_index -= 1
-                        elif key == "down":
+                        elif key in ("down", "scroll_down"):
                             if self.current_tab == "containers":
                                 if self.selected_index < len(self.containers) - 1:
                                     self.selected_index += 1
@@ -1288,6 +1391,9 @@ class ContainerDashboard:
                             elif self.current_tab == "networks":
                                 if self.selected_network_index < len(self.networks) - 1:
                                     self.selected_network_index += 1
+                            elif self.current_tab == "contexts":
+                                if self.selected_context_index < len(self.contexts) - 1:
+                                    self.selected_context_index += 1
                             else:
                                 if self.selected_image_index < len(self.images) - 1:
                                     self.selected_image_index += 1
@@ -1323,16 +1429,29 @@ class ContainerDashboard:
                             self.system_info_text = ""  # Reset system stats on enter
                             self.view_mode = "system"
                         elif key == "l" and self.current_tab in ("containers", "compose"):
-                            sel = self.current_selected_container()
-                            if sel:
-                                self.active_container = sel
-                                self.log_filter = ""  # Reset log filter on enter
+                            if self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                                row = self.compose_rows[self.selected_compose_index]
+                                self.active_project = row["project"]
+                                self.active_container = None
+                                self.log_filter = ""
                                 self.log_search = ""
                                 self.log_errors_only = False
-                                self.log_lines = []   # Force reload logs
+                                self.log_lines = []
                                 self.log_follow = False
                                 self.last_log_refresh = 0.0
                                 self.view_mode = "logs"
+                            else:
+                                sel = self.current_selected_container()
+                                if sel:
+                                    self.active_container = sel
+                                    self.active_project = None
+                                    self.log_filter = ""  # Reset log filter on enter
+                                    self.log_search = ""
+                                    self.log_errors_only = False
+                                    self.log_lines = []   # Force reload logs
+                                    self.log_follow = False
+                                    self.last_log_refresh = 0.0
+                                    self.view_mode = "logs"
                         elif key == "v" and self.current_tab in ("containers", "compose"):
                             sel = self.current_selected_container()
                             if sel:
@@ -1352,6 +1471,19 @@ class ContainerDashboard:
                                 self.inspect_lines = inspect_data.split("\n")
                                 self.inspect_scroll_index = 0
                                 self.view_mode = "inspect"
+                        elif key == "t" and self.current_tab in ("containers", "compose"):
+                            sel = self.current_selected_container()
+                            if sel:
+                                if sel["state"] != "running":
+                                    self.set_status(f"Error: Container {sel['name']} is not running.")
+                                else:
+                                    self.active_container = sel
+                                    self.set_status(f"Loading processes for {sel['name']}...")
+                                    self.draw_main_view()
+                                    top_data = self.client.top_container(sel["id"])
+                                    self.top_lines = top_data.split("\n")
+                                    self.top_scroll_index = 0
+                                    self.view_mode = "top"
                         elif key == "e" and self.current_tab in ("containers", "compose"):
                             sel = self.current_selected_container()
                             if sel:

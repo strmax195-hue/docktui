@@ -264,6 +264,26 @@ class DockerClient:
         except Exception as e:
             return f"Error reading logs: {str(e)}"
 
+    def get_compose_project_logs(self, project_name: str, tail: int = 40) -> str:
+        """Fetches the last N log lines for all services in a Docker Compose project."""
+        if not self.is_docker_installed():
+            return "Docker not installed."
+        try:
+            res = self._run(
+                [self.docker_bin, "compose", "-p", project_name, "logs", f"--tail={tail}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8",
+                errors="replace"
+            )
+            return res.stdout or res.stderr or "(no logs available)"
+        except subprocess.TimeoutExpired:
+            return f"Timed out reading Compose logs after {self.timeout:g} seconds."
+        except Exception as e:
+            return f"Error reading Compose logs: {str(e)}"
+
+
     def inspect_container(self, container_id: str) -> str:
         """Fetches detailed inspection JSON for a container."""
         if not self.is_docker_installed():

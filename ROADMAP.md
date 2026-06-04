@@ -11,22 +11,22 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - Advanced logs with follow mode, search, next-match navigation, and error/warning-only filtering.
 - Exec command presets and session command history.
 - Separate system, image, volume, and full prune confirmations.
-- Initial TUI state tests for Compose grouping, sorting/filtering, and exec history.
-- Basic mouse input detection and terminal mouse tracking cleanup.
+- Expanded TUI state tests for Compose grouping, sorting/filtering, exec history, empty states, and file exports.
+- Non-blocking keyboard input loop with active thread refresh logic.
+- Scroll-wheel mouse navigation support across TUI views.
+- Clean export of logs, inspect JSON, details, and top views to files.
+- Beautiful empty state screens with CLI tips for all tabs.
 
 ## Near term
 
-- Better empty states when Docker is installed but no containers, images, volumes, networks, or contexts exist.
-- Richer Compose actions such as logs for an entire service group.
-- Export logs, inspect JSON, and details output to local files.
-- Broader test coverage for interactive TUI transitions and destructive-action confirmations.
-- Improve mouse support beyond detection, starting with scroll-wheel navigation where terminals expose it.
+- Theme presets for light, dark, and high-contrast terminals.
+- Optional config file for default refresh interval, log tail, and exec presets.
 
 ## Later
 
-- Theme presets for light, dark, and high-contrast terminals.
-- Optional config file for default refresh interval, log tail, and exec presets.
 - Optional project-level config for saved commands and preferred tab/sort mode.
+- Additional Compose actions (e.g. up, down, build, restart projects directly).
+
 
 ## Feedback wanted
 

@@ -80,8 +80,8 @@ docktui --docker-timeout 15
 ### Hotkeys & Keyboard Navigation
 
 #### Global Controls
-- **`Tab` or `1`-`5`**: Switch between **Containers**, **Compose**, **Images**, **Volumes**, and **Networks** tabs.
-- **`↑` / `↓` (Arrow Keys)**: Navigate list items.
+- **`Tab` or `1`-`6`**: Switch between **Containers**, **Compose**, **Images**, **Volumes**, **Networks**, and **Contexts** tabs.
+- **`↑` / `↓` (Arrow Keys) or Mouse Scroll Wheel**: Navigate list items and scroll text logs.
 - **`G`**: Force refresh data.
 - **`?`**: Open the in-app keyboard help screen.
 - **`Q`**: Exit DockTUI.
@@ -90,9 +90,10 @@ docktui --docker-timeout 15
 - **`S`**: Start or Stop the selected container.
 - **`S` on a Compose project row**: Start or stop all containers in that project group.
 - **`R`**: Restart the selected container or selected Compose project group.
-- **`L`**: Open fullscreen interactive **Logs View**.
+- **`L`**: Open fullscreen interactive **Logs View** (opens aggregated logs when a Compose project row is selected).
 - **`V`**: Open readable **Details View**.
 - **`I`**: Open fullscreen interactive **Inspect View**.
+- **`T`**: Open processes running inside the container (**Top View**).
 - **`E`**: Execute a shell command inside the running container (**Exec View**).
 - **`N`**: Rename the selected container.
 - **`/`**: Filter the containers grid by name/image.
@@ -109,8 +110,11 @@ docktui --docker-timeout 15
 - **`D`**: Delete the selected volume (asks for confirmation).
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
 
-#### In-View Navigation (Logs, Inspect, Exec, System Views)
-- **`↑` / `↓` (Arrow Keys)**: Scroll content line-by-line.
+#### Contexts Tab
+- **`U`**: Switch active Docker context to the selected context.
+
+#### In-View Navigation (Logs, Inspect, Exec, Details, Top, System Views)
+- **`↑` / `↓` (Arrow Keys) or Mouse Scroll Wheel**: Scroll content.
 - **`Esc` or View Key**: Return back to the main dashboard.
 - **Logs View Features**:
   - `F`: Toggle follow mode to keep refreshing and pinning logs to the newest lines.
@@ -118,8 +122,11 @@ docktui --docker-timeout 15
   - `/`: Search/filter logs for specific terms.
   - `N`: Jump to the next search match.
   - `E`: Toggle error/warning-only log lines.
+  - `O`: Export the current logs buffer to a local file.
   - `C`: Clear active log filters.
   - `+` / `-`: Increase/decrease log line retrieval limits.
+- **Inspect, Details, Top Views**:
+  - `O`: Export the current view buffer to a local file.
 - **Exec View Features**:
   - `R`: Re-run the current command.
   - `E`: Execute a new preset, recent, or custom command.
