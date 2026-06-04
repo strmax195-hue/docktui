@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="220" viewBox="0 0 760 220" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="220" viewBox="0 0 880 220" role="img" aria-labelledby="title desc">
   <title id="title">DockTUI logo</title>
   <desc id="desc">DockTUI wordmark with a terminal container mark.</desc>
-  <rect width="760" height="220" fill="none"/>
+  <rect width="880" height="220" fill="none"/>
   <g transform="translate(70 42)">
     <rect x="0" y="0" width="136" height="136" rx="28" fill="#111827"/>
     <rect x="13" y="13" width="110" height="110" rx="22" fill="#172033" stroke="#38bdf8" stroke-width="4"/>

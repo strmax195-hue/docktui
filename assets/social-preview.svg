@@ -1,27 +1,102 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
   <title id="title">DockTUI social preview</title>
   <desc id="desc">A GitHub social preview image for DockTUI.</desc>
-  <rect width="1280" height="640" fill="#0f172a"/>
-  <rect x="54" y="54" width="1172" height="532" rx="28" fill="#111827" stroke="#334155" stroke-width="2"/>
-  <g transform="translate(118 142)">
-    <rect x="0" y="0" width="190" height="190" rx="38" fill="#172033" stroke="#38bdf8" stroke-width="6"/>
-    <rect x="48" y="66" width="94" height="66" rx="9" fill="#e5edf7"/>
-    <rect x="58" y="77" width="17" height="33" rx="3" fill="#1f2937"/>
-    <rect x="84" y="77" width="17" height="33" rx="3" fill="#1f2937"/>
-    <rect x="110" y="77" width="17" height="33" rx="3" fill="#1f2937"/>
-    <path d="M48 128h94" stroke="#64748b" stroke-width="8" stroke-linecap="round"/>
-    <circle cx="30" cy="30" r="6" fill="#22c55e"/>
-    <circle cx="52" cy="30" r="6" fill="#facc15"/>
-    <circle cx="74" cy="30" r="6" fill="#ef4444"/>
+
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f19" />
+      <stop offset="100%" stop-color="#02040a" />
+    </linearGradient>
+
+    <!-- Outer Card Border Gradient -->
+    <linearGradient id="card-border-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="50%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+
+    <!-- Title Gradient -->
+    <linearGradient id="title-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#cbd5e1" />
+    </linearGradient>
+
+    <!-- Icon Glow / Aura -->
+    <radialGradient id="logo-glow" cx="30%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Icon Border Gradient -->
+    <linearGradient id="icon-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+
+    <!-- Cargo Container Fill Gradient -->
+    <linearGradient id="container-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="100%" stop-color="#cbd5e1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Base Background -->
+  <rect width="1280" height="640" fill="url(#bg-grad)"/>
+
+  <!-- Logo Glow Backdrop -->
+  <circle cx="213" cy="320" r="300" fill="url(#logo-glow)"/>
+
+  <!-- Main Card Container -->
+  <rect x="54" y="54" width="1172" height="532" rx="28" fill="#090d16" fill-opacity="0.4" stroke="url(#card-border-grad)" stroke-width="2"/>
+
+  <!-- Logo Mark Group (Centered vertically) -->
+  <g transform="translate(118 225)">
+    <!-- Main Window Frame -->
+    <rect x="0" y="0" width="190" height="190" rx="38" fill="#0f172a" fill-opacity="0.9" stroke="url(#icon-border)" stroke-width="5"/>
+    
+    <!-- Glass/Glossy sheen overlay -->
+    <path d="M 5,95 A 185,185 0 0,1 185,95 L 185,5 A 33,33 0 0,0 152,0 L 38,0 A 33,33 0 0,0 5,5 Z" fill="#ffffff" fill-opacity="0.03"/>
+    
+    <!-- Shipping Container Graphic -->
+    <rect x="48" y="66" width="94" height="66" rx="9" fill="url(#container-grad)" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))"/>
+    
+    <!-- Slots on Container -->
+    <rect x="58" y="77" width="17" height="33" rx="3" fill="#0f172a" fill-opacity="0.85"/>
+    <rect x="84" y="77" width="17" height="33" rx="3" fill="#0f172a" fill-opacity="0.85"/>
+    <rect x="110" y="77" width="17" height="33" rx="3" fill="#0f172a" fill-opacity="0.85"/>
+    
+    <!-- Ground line of Container -->
+    <path d="M48 128h94" stroke="#475569" stroke-width="8" stroke-linecap="round"/>
+    
+    <!-- Terminal Traffic Lights -->
+    <circle cx="30" cy="30" r="7" fill="#ef4444" opacity="0.9"/>
+    <circle cx="52" cy="30" r="7" fill="#facc15" opacity="0.9"/>
+    <circle cx="74" cy="30" r="7" fill="#22c55e" opacity="0.9"/>
   </g>
-  <text x="360" y="228" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="88" font-weight="850" fill="#f8fafc">DockTUI</text>
-  <text x="366" y="296" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="34" fill="#cbd5e1">Zero-dependency Docker dashboard for your terminal</text>
-  <g font-family="Consolas, Menlo, monospace" font-size="24">
-    <text x="368" y="372" fill="#67e8f9">Compose groups</text>
-    <text x="604" y="372" fill="#86efac">follow logs</text>
-    <text x="796" y="372" fill="#facc15">exec presets</text>
-    <text x="1006" y="372" fill="#fda4af">safe prune</text>
+
+  <!-- Text Header (Centered vertically) -->
+  <text x="360" y="270" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="88" font-weight="850" fill="url(#title-grad)" letter-spacing="-1px">DockTUI</text>
+  
+  <!-- Subtitle Tagline -->
+  <text x="360" y="338" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="30" fill="#94a3b8" font-weight="400">Zero-dependency Docker dashboard for your terminal</text>
+
+  <!-- Features Group -->
+  <g font-family="Consolas, Menlo, monospace" font-size="22" font-weight="bold">
+    <!-- Feature 1: Compose groups -->
+    <circle cx="376" cy="406" r="6" fill="#38bdf8"/>
+    <text x="394" y="414" fill="#38bdf8">Compose groups</text>
+    
+    <!-- Feature 2: Follow logs -->
+    <circle cx="616" cy="406" r="6" fill="#4ade80"/>
+    <text x="634" y="414" fill="#4ade80">follow logs</text>
+    
+    <!-- Feature 3: Exec presets -->
+    <circle cx="816" cy="406" r="6" fill="#facc15"/>
+    <text x="834" y="414" fill="#facc15">exec presets</text>
+    
+    <!-- Feature 4: Safe prune -->
+    <circle cx="1016" cy="406" r="6" fill="#fda4af"/>
+    <text x="1034" y="414" fill="#fda4af">safe prune</text>
   </g>
-  <rect x="366" y="424" width="760" height="76" rx="10" fill="#020617" stroke="#334155"/>
-  <text x="394" y="472" font-family="Consolas, Menlo, monospace" font-size="25" fill="#e2e8f0">$ pip install git+https://github.com/strmax195-hue/docktui.git</text>
 </svg>

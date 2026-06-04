@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/strmax195-hue/docktui/main/assets/logo.svg" alt="DockTUI" width="620">
+  <img src="assets/logo.svg" alt="DockTUI" width="720">
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
