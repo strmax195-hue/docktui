@@ -46,21 +46,19 @@ Use DockTUI when you want something richer than repeated `docker ps`, `docker st
 
 ## Installation
 
-Current install from GitHub:
+Install the latest code from GitHub:
 
 ```bash
 pip install git+https://github.com/strmax195-hue/docktui.git
 ```
 
-For local development:
+Local development:
 
 ```bash
 git clone https://github.com/strmax195-hue/docktui.git
 cd docktui
 pip install -e .
 ```
-
-PyPI publishing is prepared in [docs/publishing.md](docs/publishing.md). After the first release, installation will become `pip install docktui`.
 
 ---
 
