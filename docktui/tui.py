@@ -70,9 +70,12 @@ class ContainerDashboard:
         self.client = DockerClient()
         self.containers: List[Dict[str, str]] = []
         self.stats: Dict[str, Dict[str, str]] = {}
+        self.images: List[Dict[str, str]] = []
         self.selected_index = 0
+        self.selected_image_index = 0
+        self.current_tab = "containers"  # "containers" or "images"
         self.view_mode = "main"  # 'main', 'logs', 'inspect', or 'system'
-        self.status_message = "Welcome to DockTUI! Use arrow keys to navigate."
+        self.status_message = "Welcome to DockTUI! Use Tab or 1/2 keys to switch tabs."
         self.status_time = time.time()
         self.last_refresh = 0.0
         self.log_filter = ""
@@ -110,16 +113,23 @@ class ContainerDashboard:
             return f"[░░░░░░░░░░░░░░░] {percentage_str}"
 
     def refresh_data(self):
-        """Fetches fresh container info and stats from the client."""
-        self.containers = self.client.list_containers()
-        if self.containers:
-            self.stats = self.client.get_container_stats()
-            # Ensure selected index stays in bounds
-            if self.selected_index >= len(self.containers):
-                self.selected_index = max(0, len(self.containers) - 1)
-        else:
-            self.stats = {}
-            self.selected_index = 0
+        """Fetches fresh docker data based on active tab."""
+        if self.current_tab == "containers":
+            self.containers = self.client.list_containers()
+            if self.containers:
+                self.stats = self.client.get_container_stats()
+                if self.selected_index >= len(self.containers):
+                    self.selected_index = max(0, len(self.containers) - 1)
+            else:
+                self.stats = {}
+                self.selected_index = 0
+        elif self.current_tab == "images":
+            self.images = self.client.list_images()
+            if self.images:
+                if self.selected_image_index >= len(self.images):
+                    self.selected_image_index = max(0, len(self.images) - 1)
+            else:
+                self.selected_image_index = 0
         self.last_refresh = time.time()
 
     def draw_main_view(self):
@@ -155,81 +165,118 @@ class ContainerDashboard:
             print("\nPress 'q' to quit, or 'r' to retry connection.")
             return
 
-        if not self.containers:
-            print(f"\n{CYAN}No Docker containers found on this system.{RESET}")
-            print("Create some containers using 'docker run' to see them here.")
-            print("\nPress 'q' to quit. Auto-refreshing...")
-            return
-
-        # Calculate column widths dynamically based on terminal width
-        rem = width - 26
-        name_w = max(15, int(rem * 0.30))
-        image_w = max(15, int(rem * 0.30))
-        status_w = max(15, rem - name_w - image_w)
+        # Render Tab Headers
+        if self.current_tab == "containers":
+            print(f" {WHITE_ON_BLUE} 📦 Containers (1) {RESET}   [💾 Images (2)]")
+        else:
+            print(f" [📦 Containers (1)]   {WHITE_ON_BLUE} 💾 Images (2) {RESET}")
+        print("─" * (width - 1))
 
         def truncate(text: str, length: int) -> str:
             if len(text) > length:
                 return text[:length-3] + "..."
             return text.ljust(length)
 
-        # Table headers
-        header_line = f"{BOLD}{'ID':<12} {truncate('NAME', name_w)} {truncate('IMAGE', image_w)} {'STATE':<10} {truncate('STATUS', status_w)}{RESET}"
-        print(header_line)
-        print("─" * (width - 1))
-
-        # Render list of containers
-        for idx, c in enumerate(self.containers):
-            # Highlight selected row
-            style = WHITE_ON_BLUE if idx == self.selected_index else ""
-            
-            # Format state color
-            state = c["state"]
-            if state == "running":
-                state_formatted = f"{GREEN}running{RESET}"
-            elif state in ("exited", "dead"):
-                state_formatted = f"{RED}{state}{RESET}"
+        # Render corresponding Tab Grid
+        if self.current_tab == "containers":
+            if not self.containers:
+                print(f"\n{CYAN}No Docker containers found on this system.{RESET}")
+                print("Create some containers using 'docker run' to see them here.")
             else:
-                state_formatted = f"{YELLOW}{state}{RESET}"
+                # Calculate column widths dynamically based on terminal width
+                rem = width - 26
+                name_w = max(15, int(rem * 0.30))
+                image_w = max(15, int(rem * 0.30))
+                status_w = max(15, rem - name_w - image_w)
 
-            if idx == self.selected_index:
-                # Remove formatting on selected row to keep background color consistent
-                state_formatted = state
-                name_str = f"» {c['name']}"
+                # Table headers
+                header_line = f"{BOLD}{'ID':<12} {truncate('NAME', name_w)} {truncate('IMAGE', image_w)} {'STATE':<10} {truncate('STATUS', status_w)}{RESET}"
+                print(header_line)
+                print("─" * (width - 1))
+
+                # Render list of containers
+                for idx, c in enumerate(self.containers):
+                    # Highlight selected row
+                    style = WHITE_ON_BLUE if idx == self.selected_index else ""
+                    
+                    # Format state color
+                    state = c["state"]
+                    if state == "running":
+                        state_formatted = f"{GREEN}running{RESET}"
+                    elif state in ("exited", "dead"):
+                        state_formatted = f"{RED}{state}{RESET}"
+                    else:
+                        state_formatted = f"{YELLOW}{state}{RESET}"
+
+                    if idx == self.selected_index:
+                        state_formatted = state
+                        name_str = f"» {c['name']}"
+                    else:
+                        name_str = f"  {c['name']}"
+
+                    line = f"{style}{c['id'][:10]:<12} {truncate(name_str, name_w)} {truncate(c['image'], image_w)} {state_formatted:<10} {truncate(c['status'], status_w)}{RESET}"
+                    print(line)
+
+                print("─" * (width - 1))
+
+                # Render Stats section for selected container
+                sel = self.containers[self.selected_index]
+                c_id = sel["id"]
+                print(f"\n{CYAN}{BOLD}CONTAINER RESOURCE USAGE:{RESET}")
+                
+                c_stats = self.stats.get(c_id) or self.stats.get(sel["name"])
+                if c_stats and sel["state"] == "running":
+                    cpu_bar = self.get_percentage_bar(c_stats['cpu'], width=int(width*0.2))
+                    mem_bar = self.get_percentage_bar(c_stats['mem_perc'], width=int(width*0.2))
+                    print(f"  CPU:  {GREEN}{cpu_bar}{RESET}")
+                    print(f"  MEM:  {GREEN}{mem_bar} ({c_stats['memory']}){RESET}")
+                    print(f"  NET:  {GREEN}{c_stats['net']}{RESET}")
+                else:
+                    status_text = "N/A (container stopped)" if sel["state"] != "running" else "Loading stats..."
+                    print(f"  Usage statistics: {YELLOW}{status_text}{RESET}")
+
+        elif self.current_tab == "images":
+            if not self.images:
+                print(f"\n{CYAN}No local Docker images found on this system.{RESET}")
+                print("Run 'docker pull' to fetch images.")
             else:
-                name_str = f"  {c['name']}"
+                # Calculate column widths dynamically based on terminal width
+                rem = width - 26
+                repo_w = max(20, int(rem * 0.45))
+                tag_w = max(12, int(rem * 0.25))
+                size_w = max(10, rem - repo_w - tag_w)
 
-            line = f"{style}{c['id'][:10]:<12} {truncate(name_str, name_w)} {truncate(c['image'], image_w)} {state_formatted:<10} {truncate(c['status'], status_w)}{RESET}"
-            print(line)
+                # Table headers
+                header_line = f"{BOLD}{'IMAGE ID':<12} {truncate('REPOSITORY', repo_w)} {truncate('TAG', tag_w)} {truncate('SIZE', size_w)}{RESET}"
+                print(header_line)
+                print("─" * (width - 1))
 
-        print("─" * (width - 1))
+                # Render list of images
+                for idx, img in enumerate(self.images):
+                    style = WHITE_ON_BLUE if idx == self.selected_image_index else ""
+                    
+                    if idx == self.selected_image_index:
+                        repo_str = f"» {img['repository']}"
+                    else:
+                        repo_str = f"  {img['repository']}"
 
-        # Render Stats section for selected container
-        if self.containers:
-            sel = self.containers[self.selected_index]
-            c_id = sel["id"]
-            print(f"\n{CYAN}{BOLD}CONTAINER RESOURCE USAGE:{RESET}")
-            
-            c_stats = self.stats.get(c_id) or self.stats.get(sel["name"])
-            if c_stats and sel["state"] == "running":
-                cpu_bar = self.get_percentage_bar(c_stats['cpu'], width=int(width*0.2))
-                mem_bar = self.get_percentage_bar(c_stats['mem_perc'], width=int(width*0.2))
-                print(f"  CPU:  {GREEN}{cpu_bar}{RESET}")
-                print(f"  MEM:  {GREEN}{mem_bar} ({c_stats['memory']}){RESET}")
-                print(f"  NET:  {GREEN}{c_stats['net']}{RESET}")
-            else:
-                status_text = "N/A (container stopped)" if sel["state"] != "running" else "Loading stats..."
-                print(f"  Usage statistics: {YELLOW}{status_text}{RESET}")
+                    line = f"{style}{img['id'][:10]:<12} {truncate(repo_str, repo_w)} {truncate(img['tag'], tag_w)} {truncate(img['size'], size_w)}{RESET}"
+                    print(line)
+                print("─" * (width - 1))
 
         # Render status line at bottom
         print("\n" + "═" * (width - 1))
         # Clear status message if old
         if time.time() - self.status_time > 4:
-            self.status_message = "Use Arrow keys to select. Auto-refreshing every 2s."
+            self.status_message = "Use Tab to switch tabs. Up/Down to navigate."
         print(f"{BOLD}Status:{RESET} {self.status_message}")
         print("═" * (width - 1))
         
-        # Action instructions
-        print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [P] Disk/Prune | [G] Refresh | [Q] Quit{RESET}")
+        # Action instructions depending on the active tab
+        if self.current_tab == "containers":
+            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [P] Disk/Prune | [Tab] Tab | [G] Refresh | [Q] Quit{RESET}")
+        else:
+            print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch Tab | [G] Refresh | [Q] Quit{RESET}")
 
     def draw_logs_view(self):
         """Renders the fullscreen log viewer screen."""
@@ -414,23 +461,40 @@ class ContainerDashboard:
                     # Dashboard controls (main view)
                     if key == "q":
                         running = False
+                    elif key in ("\t", "1", "2"):
+                        if key == "\t":
+                            self.current_tab = "images" if self.current_tab == "containers" else "containers"
+                        elif key == "1":
+                            self.current_tab = "containers"
+                        elif key == "2":
+                            self.current_tab = "images"
+                        self.set_status(f"Switched tab to {self.current_tab}.")
+                        self.refresh_data()
                     elif key == "up":
-                        if self.selected_index > 0:
-                            self.selected_index -= 1
+                        if self.current_tab == "containers":
+                            if self.selected_index > 0:
+                                self.selected_index -= 1
+                        else:
+                            if self.selected_image_index > 0:
+                                self.selected_image_index -= 1
                     elif key == "down":
-                        if self.selected_index < len(self.containers) - 1:
-                            self.selected_index += 1
+                        if self.current_tab == "containers":
+                            if self.selected_index < len(self.containers) - 1:
+                                self.selected_index += 1
+                        else:
+                            if self.selected_image_index < len(self.images) - 1:
+                                self.selected_image_index += 1
                     elif key == "g":
                         self.set_status("Refreshing data...")
                         self.refresh_data()
-                    elif key == "l":
-                        if self.containers:
-                            self.log_filter = ""  # Reset log filter on enter
-                            self.view_mode = "logs"
                     elif key == "p":
                         self.system_info_text = ""  # Reset system stats on enter
                         self.view_mode = "system"
-                    elif key == "i":
+                    elif key == "l" and self.current_tab == "containers":
+                        if self.containers:
+                            self.log_filter = ""  # Reset log filter on enter
+                            self.view_mode = "logs"
+                    elif key == "i" and self.current_tab == "containers":
                         if self.containers:
                             sel = self.containers[self.selected_index]
                             self.set_status(f"Inspecting container {sel['name']}...")
@@ -439,7 +503,7 @@ class ContainerDashboard:
                             self.inspect_lines = inspect_data.split("\n")
                             self.inspect_scroll_index = 0
                             self.view_mode = "inspect"
-                    elif key == "r":
+                    elif key == "r" and self.current_tab == "containers":
                         # Attempt to reconnect daemon or restart container
                         if not self.client.is_daemon_running():
                             self.set_status("Reconnecting to Docker daemon...")
@@ -453,7 +517,7 @@ class ContainerDashboard:
                             else:
                                 self.set_status(f"Failed to restart container {sel['name']}.")
                             self.refresh_data()
-                    elif key == "s":
+                    elif key == "s" and self.current_tab == "containers":
                         if self.containers:
                             sel = self.containers[self.selected_index]
                             if sel["state"] == "running":
@@ -471,6 +535,25 @@ class ContainerDashboard:
                                 else:
                                     self.set_status(f"Failed to start container {sel['name']}.")
                             self.refresh_data()
+                    elif key == "d" and self.current_tab == "images":
+                        if self.images:
+                            sel_img = self.images[self.selected_image_index]
+                            confirm = self.prompt_user(f"Delete image {sel_img['repository']}:{sel_img['tag']}? (y/n): ")
+                            if confirm.lower() in ("y", "yes"):
+                                self.set_status(f"Deleting image {sel_img['id'][:10]}...")
+                                self.draw_main_view()
+                                success, msg = self.client.remove_image(sel_img["id"])
+                                if success:
+                                    self.set_status(f"Successfully deleted image.")
+                                else:
+                                    # Output clean error dump
+                                    print("\n" + "─" * 40)
+                                    print(f"{RED}Error: {msg}{RESET}")
+                                    print("─" * 40)
+                                    self.prompt_user("Press ENTER to continue.")
+                                self.refresh_data()
+                            else:
+                                self.set_status("Deletion canceled.")
 
             # Small sleep to prevent high CPU usage
             time.sleep(0.08)

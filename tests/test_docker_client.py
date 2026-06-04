@@ -94,5 +94,27 @@ class TestDockerClient(unittest.TestCase):
         prune_res = self.client.prune_system()
         self.assertEqual(prune_res, mock_stdout)
 
+    @patch("subprocess.run")
+    def test_list_images(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_stdout = "sha256:123|nginx|latest|142MB\nsha256:456|postgres|15|379MB\n"
+        mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
+        
+        images = self.client.list_images()
+        self.assertEqual(len(images), 2)
+        self.assertEqual(images[0]["id"], "sha256:123")
+        self.assertEqual(images[0]["repository"], "nginx")
+        self.assertEqual(images[0]["tag"], "latest")
+        self.assertEqual(images[0]["size"], "142MB")
+
+    @patch("subprocess.run")
+    def test_remove_image(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        
+        success, msg = self.client.remove_image("sha256:123")
+        self.assertTrue(success)
+        self.assertIn("Successfully removed image", msg)
+
 if __name__ == "__main__":
     unittest.main()

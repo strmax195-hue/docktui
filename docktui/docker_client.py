@@ -1,6 +1,6 @@
 import subprocess
 import shutil
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 class DockerClient:
     """Interacts with the local Docker daemon via the Docker CLI command line."""
@@ -185,3 +185,53 @@ class DockerClient:
             return res.stdout or res.stderr or "Prune completed with no output."
         except Exception as e:
             return f"Error running prune command: {str(e)}"
+
+    def list_images(self) -> List[Dict[str, str]]:
+        """
+        Retrieves a list of all local images via 'docker images'.
+        Returns a list of dicts with keys: id, repository, tag, size.
+        """
+        if not self.is_docker_installed():
+            return []
+
+        cmd = [
+            self.docker_bin, "images",
+            "--format", "{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}"
+        ]
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            images = []
+            for line in res.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 4:
+                    images.append({
+                        "id": parts[0],
+                        "repository": parts[1],
+                        "tag": parts[2],
+                        "size": parts[3]
+                    })
+            return images
+        except subprocess.CalledProcessError:
+            return []
+
+    def remove_image(self, image_id: str) -> Tuple[bool, str]:
+        """Removes a local Docker image."""
+        if not self.is_docker_installed():
+            return False, "Docker not installed."
+        try:
+            res = subprocess.run(
+                [self.docker_bin, "rmi", image_id],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            if res.returncode == 0:
+                return True, f"Successfully removed image {image_id}."
+            else:
+                return False, res.stderr or f"Failed to remove image {image_id}."
+        except Exception as e:
+            return False, f"Error removing image: {str(e)}"
