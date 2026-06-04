@@ -72,18 +72,33 @@ class ContainerDashboard:
         self.containers: List[Dict[str, str]] = []
         self.stats: Dict[str, Dict[str, str]] = {}
         self.images: List[Dict[str, str]] = []
+        self.volumes: List[Dict[str, str]] = []
+        self.networks: List[Dict[str, str]] = []
+        self.compose_rows: List[Dict[str, object]] = []
+        self.active_container: Optional[Dict[str, str]] = None
         self.selected_index = 0
         self.selected_image_index = 0
-        self.current_tab = "containers"  # "containers" or "images"
-        self.view_mode = "main"  # 'main', 'logs', 'inspect', 'system', 'exec', or 'help'
+        self.selected_volume_index = 0
+        self.selected_network_index = 0
+        self.selected_compose_index = 0
+        self.tabs = ["containers", "compose", "images", "volumes", "networks"]
+        self.current_tab = "containers"
+        self.view_mode = "main"  # 'main', 'logs', 'inspect', 'details', 'system', 'exec', or 'help'
         self.previous_view_mode = "main"
         self.status_message = "Welcome to DockTUI! Use Tab or 1/2 keys to switch tabs."
         self.status_time = time.time()
         self.last_refresh = 0.0
         self.log_filter = ""
+        self.log_search = ""
+        self.log_match_index = 0
+        self.log_errors_only = False
         self.container_filter = ""
+        self.state_filter = "all"
+        self.sort_mode = "default"
         self.inspect_lines: List[str] = []
         self.inspect_scroll_index = 0
+        self.details_lines: List[str] = []
+        self.details_scroll_index = 0
         self.log_tail_limit = 40
         self.log_lines: List[str] = []
         self.log_scroll_index = 0
@@ -92,6 +107,8 @@ class ContainerDashboard:
         self.exec_output_lines: List[str] = []
         self.exec_scroll_index = 0
         self.exec_command_text = ""
+        self.exec_history: List[str] = []
+        self.exec_presets = ["sh", "bash", "env", "ls -la", "cat /etc/os-release"]
         self.system_info_text = ""
         self.daemon_running = False
         self.last_daemon_check = 0.0
@@ -143,10 +160,81 @@ class ContainerDashboard:
             # Fallback if loading or N/A
             return f"[░░░░░░░░░░░░░░░] {percentage_str}"
 
+    def truncate(self, text: str, length: int) -> str:
+        if len(text) > length:
+            return text[:max(0, length - 3)] + "..."
+        return text.ljust(length)
+
+    def cycle_tab(self, offset: int = 1):
+        idx = self.tabs.index(self.current_tab)
+        self.current_tab = self.tabs[(idx + offset) % len(self.tabs)]
+        self.set_status(f"Switched tab to {self.current_tab}.")
+        self.refresh_data()
+
+    def current_selected_container(self) -> Optional[Dict[str, str]]:
+        if self.current_tab == "containers" and self.containers:
+            return self.containers[self.selected_index]
+        if self.current_tab == "compose" and self.compose_rows:
+            row = self.compose_rows[self.selected_compose_index]
+            if row.get("type") == "container":
+                return row.get("container")  # type: ignore[return-value]
+        return None
+
+    def sort_containers(self, containers: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        if self.state_filter != "all":
+            containers = [c for c in containers if c.get("state") == self.state_filter]
+        if self.container_filter:
+            needle = self.container_filter.lower()
+            containers = [
+                c for c in containers
+                if needle in c.get("name", "").lower()
+                or needle in c.get("image", "").lower()
+                or needle in c.get("compose_project", "").lower()
+                or needle in c.get("compose_service", "").lower()
+            ]
+        if self.sort_mode == "name":
+            return sorted(containers, key=lambda c: c.get("name", ""))
+        if self.sort_mode == "image":
+            return sorted(containers, key=lambda c: c.get("image", ""))
+        if self.sort_mode == "state":
+            return sorted(containers, key=lambda c: (c.get("state") != "running", c.get("name", "")))
+        return sorted(containers, key=lambda c: (c.get("state") != "running", c.get("name", "")))
+
+    def build_compose_rows(self):
+        groups: Dict[str, List[Dict[str, str]]] = {}
+        loose = []
+        for container in self.containers:
+            project = container.get("compose_project")
+            if project:
+                groups.setdefault(project, []).append(container)
+            else:
+                loose.append(container)
+
+        rows: List[Dict[str, object]] = []
+        for project in sorted(groups):
+            project_containers = sorted(groups[project], key=lambda c: (c.get("compose_service", ""), c.get("name", "")))
+            rows.append({"type": "project", "project": project, "containers": project_containers})
+            for container in project_containers:
+                rows.append({"type": "container", "project": project, "container": container})
+        if loose:
+            rows.append({"type": "project", "project": "(standalone)", "containers": loose})
+            for container in sorted(loose, key=lambda c: c.get("name", "")):
+                rows.append({"type": "container", "project": "(standalone)", "container": container})
+        self.compose_rows = rows
+        if self.selected_compose_index >= len(self.compose_rows):
+            self.selected_compose_index = max(0, len(self.compose_rows) - 1)
+
     def load_log_lines(self, container_id: str, viewport_height: int, follow: bool = False):
         """Loads logs and keeps the viewport pinned to the bottom in follow mode."""
         raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit)
         log_lines = raw_logs.split("\n")
+        if self.log_errors_only:
+            log_lines = [
+                line for line in log_lines
+                if "error" in line.lower() or "warn" in line.lower() or "exception" in line.lower()
+            ]
+            if not log_lines:
+                log_lines = [f"{YELLOW}(No error/warning lines in current log window){RESET}"]
         if self.log_filter:
             self.log_lines = [line for line in log_lines if self.log_filter.lower() in line.lower()]
             if not self.log_lines:
@@ -157,16 +245,81 @@ class ContainerDashboard:
             self.log_scroll_index = max(0, len(self.log_lines) - viewport_height)
         self.last_log_refresh = time.time()
 
+    def jump_to_next_log_match(self, viewport_height: int):
+        """Moves the log viewport to the next search match."""
+        query = self.log_search or self.log_filter
+        if not query or not self.log_lines:
+            self.set_status("Set a log search first with '/'.")
+            return
+        matches = [idx for idx, line in enumerate(self.log_lines) if query.lower() in line.lower()]
+        if not matches:
+            self.set_status(f"No log matches for '{query}'.")
+            return
+        self.log_match_index = (self.log_match_index + 1) % len(matches)
+        self.log_scroll_index = max(0, min(matches[self.log_match_index], len(self.log_lines) - viewport_height))
+        self.log_follow = False
+        self.set_status(f"Log match {self.log_match_index + 1}/{len(matches)}.")
+
+    def build_details_lines(self, container_id: str) -> List[str]:
+        details = self.client.get_container_details(container_id)
+        if "error" in details:
+            return details["error"].split("\n")
+        lines = [
+            f"Name: {details.get('name', '')}",
+            f"ID: {details.get('id', '')}",
+            f"Image: {details.get('image', '')}",
+            f"Status: {details.get('status', '')}",
+            f"Running: {details.get('running', '')}",
+            f"Created: {details.get('created', '')}",
+            f"Restart policy: {details.get('restart_policy', '') or '(none)'}",
+            "",
+            "Ports:",
+        ]
+        lines.extend(f"  {line}" for line in details.get("ports", "").split("\n"))
+        lines.append("")
+        lines.append("Mounts:")
+        lines.extend(f"  {line}" for line in details.get("mounts", "").split("\n"))
+        lines.append("")
+        lines.append("Networks:")
+        lines.append(f"  {details.get('networks', '')}")
+        lines.append("")
+        lines.append("Environment:")
+        lines.extend(f"  {line}" for line in details.get("env", "").split("\n"))
+        lines.append("")
+        lines.append("Labels:")
+        lines.extend(f"  {line}" for line in details.get("labels", "").split("\n"))
+        return lines
+
+    def prompt_exec_command(self, container_name: str) -> str:
+        """Prompts for an exec preset, recent command, or custom command."""
+        print(f"\r\033[K{YELLOW}{BOLD}Command inside {container_name}:{RESET}", flush=True)
+        options = list(self.exec_presets)
+        for command in self.exec_history[:3]:
+            if command not in options:
+                options.append(command)
+        for idx, command in enumerate(options, start=1):
+            print(f"  {idx}. {command}")
+        print("  C. custom command")
+        choice = self.prompt_user("Choose preset number or C: ")
+        if choice.lower() == "c":
+            return self.prompt_user("Custom command: ")
+        if choice.isdigit():
+            index = int(choice) - 1
+            if 0 <= index < len(options):
+                return options[index]
+        return choice
+
+    def record_exec_command(self, command: str):
+        if command in self.exec_history:
+            self.exec_history.remove(command)
+        self.exec_history.insert(0, command)
+        self.exec_history = self.exec_history[:10]
+
     def refresh_data(self):
         """Fetches fresh docker data based on active tab."""
-        if self.current_tab == "containers":
-            self.containers = self.client.list_containers()
-            if self.container_filter:
-                self.containers = [
-                    c for c in self.containers
-                    if self.container_filter.lower() in c["name"].lower()
-                    or self.container_filter.lower() in c["image"].lower()
-                ]
+        if self.current_tab in ("containers", "compose"):
+            self.containers = self.sort_containers(self.client.list_containers())
+            self.build_compose_rows()
             if self.containers:
                 self.stats = self.client.get_container_stats()
                 if self.selected_index >= len(self.containers):
@@ -174,6 +327,7 @@ class ContainerDashboard:
             else:
                 self.stats = {}
                 self.selected_index = 0
+                self.selected_compose_index = 0
         elif self.current_tab == "images":
             self.images = self.client.list_images()
             if self.images:
@@ -181,6 +335,14 @@ class ContainerDashboard:
                     self.selected_image_index = max(0, len(self.images) - 1)
             else:
                 self.selected_image_index = 0
+        elif self.current_tab == "volumes":
+            self.volumes = self.client.list_volumes()
+            if self.selected_volume_index >= len(self.volumes):
+                self.selected_volume_index = max(0, len(self.volumes) - 1)
+        elif self.current_tab == "networks":
+            self.networks = self.client.list_networks()
+            if self.selected_network_index >= len(self.networks):
+                self.selected_network_index = max(0, len(self.networks) - 1)
         self.last_refresh = time.time()
 
     def draw_main_view(self):
@@ -216,18 +378,27 @@ class ContainerDashboard:
             print("\nPress 'q' to quit, or 'r' to retry connection.")
             return
 
-        # Render Tab Headers
-        filter_status = f"    [Filter: {self.container_filter}]" if self.container_filter else ""
-        if self.current_tab == "containers":
-            print(f" {WHITE_ON_BLUE} 📦 Containers (1) {RESET}   [💾 Images (2)]{filter_status}")
-        else:
-            print(f" [📦 Containers (1)]   {WHITE_ON_BLUE} 💾 Images (2) {RESET}")
+        tab_labels = {
+            "containers": "Containers",
+            "compose": "Compose",
+            "images": "Images",
+            "volumes": "Volumes",
+            "networks": "Networks",
+        }
+        header_parts = []
+        for idx, tab in enumerate(self.tabs, start=1):
+            label = f"{tab_labels[tab]} ({idx})"
+            header_parts.append(f"{WHITE_ON_BLUE} {label} {RESET}" if tab == self.current_tab else f"[{label}]")
+        filter_bits = []
+        if self.container_filter:
+            filter_bits.append(f"filter: {self.container_filter}")
+        if self.state_filter != "all":
+            filter_bits.append(f"state: {self.state_filter}")
+        if self.sort_mode != "default":
+            filter_bits.append(f"sort: {self.sort_mode}")
+        filter_status = "    [" + " | ".join(filter_bits) + "]" if filter_bits else ""
+        print("   ".join(header_parts) + filter_status)
         print("─" * (width - 1))
-
-        def truncate(text: str, length: int) -> str:
-            if len(text) > length:
-                return text[:length-3] + "..."
-            return text.ljust(length)
 
         # Render corresponding Tab Grid
         if self.current_tab == "containers":
@@ -246,7 +417,7 @@ class ContainerDashboard:
                 status_w = max(15, rem - name_w - image_w)
 
                 # Table headers
-                header_line = f"{BOLD}{'ID':<12} {truncate('NAME', name_w)} {truncate('IMAGE', image_w)} {'STATE':<10} {truncate('STATUS', status_w)}{RESET}"
+                header_line = f"{BOLD}{'ID':<12} {self.truncate('NAME', name_w)} {self.truncate('IMAGE', image_w)} {'STATE':<10} {self.truncate('STATUS', status_w)}{RESET}"
                 print(header_line)
                 print("─" * (width - 1))
 
@@ -270,7 +441,7 @@ class ContainerDashboard:
                     else:
                         name_str = f"  {c['name']}"
 
-                    line = f"{style}{c['id'][:10]:<12} {truncate(name_str, name_w)} {truncate(c['image'], image_w)} {state_formatted:<10} {truncate(c['status'], status_w)}{RESET}"
+                    line = f"{style}{c['id'][:10]:<12} {self.truncate(name_str, name_w)} {self.truncate(c['image'], image_w)} {state_formatted:<10} {self.truncate(c['status'], status_w)}{RESET}"
                     print(line)
 
                 print("─" * (width - 1))
@@ -291,6 +462,33 @@ class ContainerDashboard:
                     status_text = "N/A (container stopped)" if sel["state"] != "running" else "Loading stats..."
                     print(f"  Usage statistics: {YELLOW}{status_text}{RESET}")
 
+        elif self.current_tab == "compose":
+            if not self.compose_rows:
+                print(f"\n{CYAN}No Docker Compose containers found.{RESET}")
+                print("Standalone containers are shown under the '(standalone)' group when available.")
+            else:
+                service_w = max(18, int(width * 0.25))
+                name_w = max(18, int(width * 0.25))
+                image_w = max(20, int(width * 0.25))
+                print(f"{BOLD}{self.truncate('PROJECT / SERVICE', service_w)} {self.truncate('CONTAINER', name_w)} {'STATE':<10} {self.truncate('IMAGE', image_w)}{RESET}")
+                print("─" * (width - 1))
+                for idx, row in enumerate(self.compose_rows):
+                    style = WHITE_ON_BLUE if idx == self.selected_compose_index else ""
+                    if row["type"] == "project":
+                        project = str(row["project"])
+                        count = len(row["containers"])  # type: ignore[arg-type]
+                        print(f"{style}{BOLD}{self.truncate(project + '  (' + str(count) + ')', service_w)} {self.truncate('', name_w)} {'':<10} {self.truncate('', image_w)}{RESET}")
+                    else:
+                        container = row["container"]  # type: ignore[assignment]
+                        service = container.get("compose_service") or "(standalone)"
+                        state = container.get("state", "")
+                        marker = "» " if idx == self.selected_compose_index else "  "
+                        print(
+                            f"{style}{self.truncate(marker + service, service_w)} "
+                            f"{self.truncate(container.get('name', ''), name_w)} "
+                            f"{state:<10} {self.truncate(container.get('image', ''), image_w)}{RESET}"
+                        )
+
         elif self.current_tab == "images":
             if not self.images:
                 print(f"\n{CYAN}No local Docker images found on this system.{RESET}")
@@ -303,7 +501,7 @@ class ContainerDashboard:
                 size_w = max(10, rem - repo_w - tag_w)
 
                 # Table headers
-                header_line = f"{BOLD}{'IMAGE ID':<12} {truncate('REPOSITORY', repo_w)} {truncate('TAG', tag_w)} {truncate('SIZE', size_w)}{RESET}"
+                header_line = f"{BOLD}{'IMAGE ID':<12} {self.truncate('REPOSITORY', repo_w)} {self.truncate('TAG', tag_w)} {self.truncate('SIZE', size_w)}{RESET}"
                 print(header_line)
                 print("─" * (width - 1))
 
@@ -316,8 +514,37 @@ class ContainerDashboard:
                     else:
                         repo_str = f"  {img['repository']}"
 
-                    line = f"{style}{img['id'][:10]:<12} {truncate(repo_str, repo_w)} {truncate(img['tag'], tag_w)} {truncate(img['size'], size_w)}{RESET}"
+                    line = f"{style}{img['id'][:10]:<12} {self.truncate(repo_str, repo_w)} {self.truncate(img['tag'], tag_w)} {self.truncate(img['size'], size_w)}{RESET}"
                     print(line)
+                print("─" * (width - 1))
+
+        elif self.current_tab == "volumes":
+            if not self.volumes:
+                print(f"\n{CYAN}No Docker volumes found on this system.{RESET}")
+            else:
+                name_w = max(30, int(width * 0.50))
+                driver_w = max(12, int(width * 0.20))
+                print(f"{BOLD}{self.truncate('VOLUME', name_w)} {self.truncate('DRIVER', driver_w)} {'SCOPE':<12}{RESET}")
+                print("─" * (width - 1))
+                for idx, volume in enumerate(self.volumes):
+                    style = WHITE_ON_BLUE if idx == self.selected_volume_index else ""
+                    marker = "» " if idx == self.selected_volume_index else "  "
+                    print(f"{style}{self.truncate(marker + volume['name'], name_w)} {self.truncate(volume['driver'], driver_w)} {volume['scope']:<12}{RESET}")
+                print("─" * (width - 1))
+
+        elif self.current_tab == "networks":
+            if not self.networks:
+                print(f"\n{CYAN}No Docker networks found on this system.{RESET}")
+            else:
+                id_w = 12
+                name_w = max(30, int(width * 0.45))
+                driver_w = max(12, int(width * 0.20))
+                print(f"{BOLD}{'ID':<12} {self.truncate('NETWORK', name_w)} {self.truncate('DRIVER', driver_w)} {'SCOPE':<12}{RESET}")
+                print("─" * (width - 1))
+                for idx, network in enumerate(self.networks):
+                    style = WHITE_ON_BLUE if idx == self.selected_network_index else ""
+                    marker = "» " if idx == self.selected_network_index else "  "
+                    print(f"{style}{network['id'][:10]:<12} {self.truncate(marker + network['name'], name_w)} {self.truncate(network['driver'], driver_w)} {network['scope']:<12}{RESET}")
                 print("─" * (width - 1))
 
         # Render status line at bottom
@@ -329,10 +556,14 @@ class ContainerDashboard:
         print("═" * (width - 1))
         
         # Action instructions depending on the active tab
-        if self.current_tab == "containers":
-            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [E] Exec | [N] Rename | [/] Filter | [?] Help | [Q] Quit{RESET}")
+        if self.current_tab in ("containers", "compose"):
+            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [O] Sort | [Y] State | [?] Help | [Q] Quit{RESET}")
+        elif self.current_tab == "images":
+            print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
+        elif self.current_tab == "volumes":
+            print(f"{CYAN}[D] Delete Volume | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
         else:
-            print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch Tab | [G] Refresh | [?] Help | [Q] Quit{RESET}")
+            print(f"{CYAN}[Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
 
     def draw_logs_view(self):
         """Renders the fullscreen log viewer screen."""
@@ -348,7 +579,7 @@ class ContainerDashboard:
             width = 80
             height = 24
 
-        sel = self.containers[self.selected_index]
+        sel = self.active_container or self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
         
         # Pull logs if not loaded
@@ -359,9 +590,11 @@ class ContainerDashboard:
             self.load_log_lines(sel["id"], viewport_height, follow=True)
 
         filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
+        search_status = f" [SEARCH: {self.log_search}]" if self.log_search else ""
+        error_status = " [ERRORS]" if self.log_errors_only else ""
         limit_status = f" [LIMIT: {self.log_tail_limit} lines]"
         follow_status = " [FOLLOW]" if self.log_follow else ""
-        title_text = f"LOGS: {sel['name']}{filter_status}{limit_status}{follow_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
+        title_text = f"LOGS: {sel['name']}{filter_status}{search_status}{error_status}{limit_status}{follow_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
         
@@ -378,7 +611,7 @@ class ContainerDashboard:
             print("")
 
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[↑/↓] Scroll | [F] Follow | [/] Filter | [C] Clear Filter | [+/-] Limit | [G] Refresh | [?] Help | [Esc/L] Back{RESET}")
+        print(f"{CYAN}[↑/↓] Scroll | [F] Follow | [Space] Pause | [/] Search | [N] Next | [E] Errors | [+/-] Limit | [?] Help | [Esc/L] Back{RESET}")
 
     def draw_help_view(self):
         """Renders a compact keyboard help screen."""
@@ -397,7 +630,7 @@ class ContainerDashboard:
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}\n")
         print(f"{BOLD}Global{RESET}")
-        print("  Tab / 1 / 2  Switch tabs")
+        print("  Tab / 1-5    Switch tabs")
         print("  Up / Down    Move selection or scroll")
         print("  G            Refresh current data")
         print("  ?            Open or close this help screen")
@@ -409,16 +642,22 @@ class ContainerDashboard:
         print("  I            Inspect container JSON")
         print("  E            Execute command in running container")
         print("  N            Rename selected container")
+        print("  V            Open readable container details")
+        print("  O / Y        Cycle sorting and state filters")
         print("  / / C        Apply or clear container filter\n")
         print(f"{BOLD}Logs{RESET}")
         print("  F            Toggle follow mode")
+        print("  Space        Pause follow mode")
+        print("  N            Jump to next search match")
+        print("  E            Toggle error/warning-only lines")
         print("  + / -        Increase or decrease log tail limit")
         print("  / / C        Apply or clear log filter")
         print("  G            Refresh logs now\n")
         print(f"{BOLD}Images and cleanup{RESET}")
         print("  D            Delete selected image")
+        print("  D            Delete selected volume on the Volumes tab")
         print("  P            Open Docker disk usage")
-        print("  X            Run prune after typing PRUNE")
+        print("  X / I / V / A Run system, image, volume, or full prune")
         print("\n" + "═" * (width - 1))
         print(f"{CYAN}[? / Esc / Q] Return to previous screen{RESET}")
 
@@ -436,7 +675,7 @@ class ContainerDashboard:
             width = 80
             height = 24
 
-        sel = self.containers[self.selected_index]
+        sel = self.active_container or self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
         
         title_text = f"INSPECT: {sel['name']} (Line {self.inspect_scroll_index + 1} of {len(self.inspect_lines)})"
@@ -456,6 +695,38 @@ class ContainerDashboard:
             
         print("\n" + "═" * (width - 1))
         print(f"{CYAN}[↑/↓] Scroll | [Esc] or [I] Return to dashboard{RESET}")
+
+    def draw_details_view(self):
+        """Renders a human-friendly container details screen."""
+        if not self.details_lines:
+            self.view_mode = "main"
+            return
+
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+            height = max(24, terminal_size.lines)
+        except Exception:
+            width = 80
+            height = 24
+
+        print("\033[2J\033[H", end="")
+        title_text = f"CONTAINER DETAILS (Line {self.details_scroll_index + 1} of {len(self.details_lines)})"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
+
+        viewport_height = height - 6
+        end_idx = min(len(self.details_lines), self.details_scroll_index + viewport_height)
+        for i in range(self.details_scroll_index, end_idx):
+            print(self.details_lines[i][:width-1])
+        for _ in range(viewport_height - (end_idx - self.details_scroll_index)):
+            print("")
+
+        print("\n" + "═" * (width - 1))
+        print(f"{CYAN}[↑/↓] Scroll | [Esc/V] Return to dashboard{RESET}")
 
     def draw_system_view(self):
         """Renders the Docker system disk usage and prune view."""
@@ -479,8 +750,9 @@ class ContainerDashboard:
             self.system_info_text = self.client.get_disk_usage()
 
         print(self.system_info_text)
+        print(f"\n{YELLOW}Preview:{RESET} Docker does not provide a dry-run for prune; review the disk usage above before confirming.")
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[X] Run Prune (clean unused containers/images) | [Esc/P] Return to dashboard{RESET}")
+        print(f"{CYAN}[X] System prune | [I] Image prune | [V] Volume prune | [A] System prune + volumes | [Esc/P] Back{RESET}")
 
     def draw_exec_view(self):
         """Renders the scrollable command execution output screen."""
@@ -496,7 +768,7 @@ class ContainerDashboard:
             width = 80
             height = 24
 
-        sel = self.containers[self.selected_index]
+        sel = self.active_container or self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
         
         title_text = f"EXEC OUT: {sel['name']} > {self.exec_command_text[:30]} (Line {self.exec_scroll_index + 1} of {len(self.exec_output_lines)})"
@@ -541,6 +813,8 @@ class ContainerDashboard:
                 self.draw_logs_view()
             elif self.view_mode == "inspect":
                 self.draw_inspect_view()
+            elif self.view_mode == "details":
+                self.draw_details_view()
             elif self.view_mode == "system":
                 self.draw_system_view()
             elif self.view_mode == "exec":
@@ -568,6 +842,9 @@ class ContainerDashboard:
                         self.log_lines = []
                         self.last_log_refresh = 0.0
                         self.set_status("Logs refreshed.")
+                    elif key == " ":
+                        self.log_follow = False
+                        self.set_status("Log follow paused.")
                     elif key == "f":
                         self.log_follow = not self.log_follow
                         self.log_lines = []
@@ -575,10 +852,21 @@ class ContainerDashboard:
                         self.set_status(f"Log follow mode {mode}.")
                     elif key == "/":
                         query = self.prompt_user("Enter search term: ")
+                        self.log_search = query
                         self.log_filter = query
+                        self.log_match_index = -1
                         self.log_lines = []
+                    elif key == "n":
+                        self.jump_to_next_log_match(viewport_h)
+                    elif key == "e":
+                        self.log_errors_only = not self.log_errors_only
+                        self.log_lines = []
+                        mode = "enabled" if self.log_errors_only else "disabled"
+                        self.set_status(f"Error-only logs {mode}.")
                     elif key == "c":
                         self.log_filter = ""
+                        self.log_search = ""
+                        self.log_errors_only = False
                         self.log_lines = []
                         self.set_status("Cleared log filter.")
                     elif key in ("+", "="):
@@ -609,22 +897,44 @@ class ContainerDashboard:
                     elif key == "?":
                         self.open_help()
                 elif self.view_mode == "system":
-                    if key == "x":
-                        confirm = self.prompt_user("Type PRUNE to clean unused Docker resources: ")
-                        if confirm != "PRUNE":
+                    if key in ("x", "i", "v", "a"):
+                        prune_name = {
+                            "x": "PRUNE",
+                            "i": "IMAGES",
+                            "v": "VOLUMES",
+                            "a": "ALL",
+                        }[key]
+                        prompt = f"Type {prune_name} to confirm prune: "
+                        confirm = self.prompt_user(prompt)
+                        if confirm != prune_name:
                             self.set_status("Prune canceled.")
                             continue
-                        self.set_status("Running docker system prune -f...")
+                        self.set_status(f"Running Docker prune ({prune_name})...")
                         self.draw_system_view()
-                        prune_out = self.client.prune_system()
-                        # Output results
+                        if key == "i":
+                            prune_out = self.client.prune_images()
+                        elif key == "v":
+                            prune_out = self.client.prune_volumes()
+                        else:
+                            prune_out = self.client.prune_system(include_volumes=(key == "a"))
                         print("\n" + "─" * 40)
                         print(prune_out)
                         print("─" * 40)
                         self.prompt_user("Prune complete. Press ENTER to continue.")
-                        self.system_info_text = ""  # Force refresh df
+                        self.system_info_text = ""
                         self.refresh_data()
                     elif key in ("p", "\x1b"):
+                        self.view_mode = "main"
+                    elif key == "?":
+                        self.open_help()
+                elif self.view_mode == "details":
+                    if key == "up":
+                        if self.details_scroll_index > 0:
+                            self.details_scroll_index -= 1
+                    elif key == "down":
+                        if self.details_scroll_index < len(self.details_lines) - viewport_h:
+                            self.details_scroll_index += 1
+                    elif key in ("v", "\x1b"):
                         self.view_mode = "main"
                     elif key == "?":
                         self.open_help()
@@ -636,19 +946,20 @@ class ContainerDashboard:
                         if self.exec_scroll_index < len(self.exec_output_lines) - viewport_h:
                             self.exec_scroll_index += 1
                     elif key == "r":
-                        if self.containers:
-                            sel = self.containers[self.selected_index]
+                        sel = self.active_container or self.current_selected_container()
+                        if sel:
                             self.set_status(f"Running command: {self.exec_command_text}...")
                             self.draw_exec_view()
                             output = self.client.exec_command(sel["id"], self.exec_command_text)
                             self.exec_output_lines = output.split("\n")
                             self.exec_scroll_index = 0
                     elif key == "e":
-                        if self.containers:
-                            sel = self.containers[self.selected_index]
-                            command = self.prompt_user(f"Command to run inside {sel['name']}: ")
+                        sel = self.active_container or self.current_selected_container()
+                        if sel:
+                            command = self.prompt_exec_command(sel["name"])
                             if command:
                                 self.exec_command_text = command
+                                self.record_exec_command(command)
                                 self.set_status(f"Running command: {command}...")
                                 self.draw_exec_view()
                                 output = self.client.exec_command(sel["id"], command)
@@ -662,19 +973,27 @@ class ContainerDashboard:
                     # Dashboard controls (main view)
                     if key == "q":
                         running = False
-                    elif key in ("\t", "1", "2"):
-                        if key == "\t":
-                            self.current_tab = "images" if self.current_tab == "containers" else "containers"
-                        elif key == "1":
-                            self.current_tab = "containers"
-                        elif key == "2":
-                            self.current_tab = "images"
+                    elif key == "\t":
+                        self.cycle_tab()
+                    elif key in ("1", "2", "3", "4", "5"):
+                        self.current_tab = self.tabs[int(key) - 1]
                         self.set_status(f"Switched tab to {self.current_tab}.")
                         self.refresh_data()
+                    elif key == "\x1b":
+                        running = False
                     elif key == "up":
                         if self.current_tab == "containers":
                             if self.selected_index > 0:
                                 self.selected_index -= 1
+                        elif self.current_tab == "compose":
+                            if self.selected_compose_index > 0:
+                                self.selected_compose_index -= 1
+                        elif self.current_tab == "volumes":
+                            if self.selected_volume_index > 0:
+                                self.selected_volume_index -= 1
+                        elif self.current_tab == "networks":
+                            if self.selected_network_index > 0:
+                                self.selected_network_index -= 1
                         else:
                             if self.selected_image_index > 0:
                                 self.selected_image_index -= 1
@@ -682,6 +1001,15 @@ class ContainerDashboard:
                         if self.current_tab == "containers":
                             if self.selected_index < len(self.containers) - 1:
                                 self.selected_index += 1
+                        elif self.current_tab == "compose":
+                            if self.selected_compose_index < len(self.compose_rows) - 1:
+                                self.selected_compose_index += 1
+                        elif self.current_tab == "volumes":
+                            if self.selected_volume_index < len(self.volumes) - 1:
+                                self.selected_volume_index += 1
+                        elif self.current_tab == "networks":
+                            if self.selected_network_index < len(self.networks) - 1:
+                                self.selected_network_index += 1
                         else:
                             if self.selected_image_index < len(self.images) - 1:
                                 self.selected_image_index += 1
@@ -694,41 +1022,69 @@ class ContainerDashboard:
                         query = self.prompt_user("Filter containers (name/image): ")
                         self.container_filter = query
                         self.selected_index = 0
+                        self.selected_compose_index = 0
                         self.set_status(f"Filter set to: '{query}'")
                         self.refresh_data()
                     elif key == "c":
                         self.container_filter = ""
                         self.selected_index = 0
+                        self.selected_compose_index = 0
                         self.set_status("Cleared container filter.")
+                        self.refresh_data()
+                    elif key == "o":
+                        modes = ["default", "name", "image", "state"]
+                        self.sort_mode = modes[(modes.index(self.sort_mode) + 1) % len(modes)]
+                        self.set_status(f"Sort mode: {self.sort_mode}.")
+                        self.refresh_data()
+                    elif key == "y":
+                        modes = ["all", "running", "exited", "created"]
+                        self.state_filter = modes[(modes.index(self.state_filter) + 1) % len(modes)]
+                        self.set_status(f"State filter: {self.state_filter}.")
                         self.refresh_data()
                     elif key == "p":
                         self.system_info_text = ""  # Reset system stats on enter
                         self.view_mode = "system"
-                    elif key == "l" and self.current_tab == "containers":
-                        if self.containers:
+                    elif key == "l" and self.current_tab in ("containers", "compose"):
+                        sel = self.current_selected_container()
+                        if sel:
+                            self.active_container = sel
                             self.log_filter = ""  # Reset log filter on enter
+                            self.log_search = ""
+                            self.log_errors_only = False
                             self.log_lines = []   # Force reload logs
                             self.log_follow = False
                             self.last_log_refresh = 0.0
                             self.view_mode = "logs"
-                    elif key == "i" and self.current_tab == "containers":
-                        if self.containers:
-                            sel = self.containers[self.selected_index]
+                    elif key == "v" and self.current_tab in ("containers", "compose"):
+                        sel = self.current_selected_container()
+                        if sel:
+                            self.active_container = sel
+                            self.set_status(f"Loading details for {sel['name']}...")
+                            self.draw_main_view()
+                            self.details_lines = self.build_details_lines(sel["id"])
+                            self.details_scroll_index = 0
+                            self.view_mode = "details"
+                    elif key == "i" and self.current_tab in ("containers", "compose"):
+                        sel = self.current_selected_container()
+                        if sel:
+                            self.active_container = sel
                             self.set_status(f"Inspecting container {sel['name']}...")
                             self.draw_main_view()
                             inspect_data = self.client.inspect_container(sel["id"])
                             self.inspect_lines = inspect_data.split("\n")
                             self.inspect_scroll_index = 0
                             self.view_mode = "inspect"
-                    elif key == "e" and self.current_tab == "containers":
-                        if self.containers:
-                            sel = self.containers[self.selected_index]
+                    elif key == "e" and self.current_tab in ("containers", "compose"):
+                        sel = self.current_selected_container()
+                        if sel:
                             if sel["state"] != "running":
                                 self.set_status(f"Error: Container {sel['name']} is not running.")
                             else:
-                                command = self.prompt_user(f"Command to run inside {sel['name']}: ")
+                                self.active_container = sel
+                                command = self.prompt_exec_command(sel["name"])
                                 if command:
                                     self.exec_command_text = command
+                                    self.record_exec_command(command)
                                     self.set_status(f"Running command: {command}...")
                                     self.draw_main_view()
                                     output = self.client.exec_command(sel["id"], command)
@@ -748,7 +1104,7 @@ class ContainerDashboard:
                                 else:
                                     self.set_status(f"Rename failed: {msg}")
                                 self.refresh_data()
-                    elif key == "r" and self.current_tab == "containers":
+                    elif key == "r" and self.current_tab in ("containers", "compose"):
                         # Attempt to reconnect daemon or restart container
                         if not self.is_daemon_running_cached(force=True):
                             self.set_status("Reconnecting to Docker daemon...")
@@ -756,8 +1112,16 @@ class ContainerDashboard:
                         elif not self.containers:
                             self.set_status("Connected to Docker daemon. Refreshing data...")
                             self.refresh_data()
-                        elif self.containers:
-                            sel = self.containers[self.selected_index]
+                        elif self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                            row = self.compose_rows[self.selected_compose_index]
+                            for container in row["containers"]:  # type: ignore[index]
+                                self.client.restart_container(container["id"])
+                            self.set_status(f"Restarted project {row['project']}.")
+                            self.refresh_data()
+                        else:
+                            sel = self.current_selected_container()
+                            if not sel:
+                                continue
                             self.set_status(f"Restarting container: {sel['name']}...")
                             self.draw_main_view()
                             if self.client.restart_container(sel["id"]):
@@ -765,9 +1129,23 @@ class ContainerDashboard:
                             else:
                                 self.set_status(f"Failed to restart container {sel['name']}.")
                             self.refresh_data()
-                    elif key == "s" and self.current_tab == "containers":
-                        if self.containers:
-                            sel = self.containers[self.selected_index]
+                    elif key == "s" and self.current_tab in ("containers", "compose"):
+                        if self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                            row = self.compose_rows[self.selected_compose_index]
+                            containers = row["containers"]  # type: ignore[index]
+                            any_running = any(c["state"] == "running" for c in containers)
+                            for container in containers:
+                                if any_running and container["state"] == "running":
+                                    self.client.stop_container(container["id"])
+                                elif not any_running:
+                                    self.client.start_container(container["id"])
+                            action = "Stopped" if any_running else "Started"
+                            self.set_status(f"{action} project {row['project']}.")
+                            self.refresh_data()
+                        else:
+                            sel = self.current_selected_container()
+                            if not sel:
+                                continue
                             if sel["state"] == "running":
                                 self.set_status(f"Stopping container: {sel['name']}...")
                                 self.draw_main_view()
@@ -802,6 +1180,16 @@ class ContainerDashboard:
                                 self.refresh_data()
                             else:
                                 self.set_status("Deletion canceled.")
+                    elif key == "d" and self.current_tab == "volumes":
+                        if self.volumes:
+                            volume = self.volumes[self.selected_volume_index]
+                            confirm = self.prompt_user(f"Delete volume {volume['name']}? (y/n): ")
+                            if confirm.lower() in ("y", "yes"):
+                                success, msg = self.client.remove_volume(volume["name"])
+                                self.set_status(msg if success else f"Volume delete failed: {msg}")
+                                self.refresh_data()
+                            else:
+                                self.set_status("Volume deletion canceled.")
 
             # Small sleep to prevent high CPU usage
             time.sleep(0.08)

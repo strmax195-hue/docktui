@@ -18,22 +18,28 @@ Use DockTUI when you want something richer than repeated `docker ps`, `docker st
 
 - **Zero runtime dependencies**: install the package and run it. No Docker SDK, no TUI framework, no daemon sidecar.
 - **Docker-native behavior**: DockTUI wraps the Docker CLI, so it respects your current Docker context, permissions, and platform setup.
-- **Practical workflows**: start, stop, restart, rename, inspect, tail logs, execute commands, browse images, and review disk usage from one terminal screen.
-- **Safe cleanup flow**: destructive cleanup requires explicit confirmation before `docker system prune -f` runs.
+- **Practical workflows**: start, stop, restart, rename, inspect, tail logs, execute commands, browse images, volumes, networks, and review disk usage from one terminal screen.
+- **Compose-aware dashboard**: containers are grouped by Docker Compose project and service labels when available.
+- **Safe cleanup flow**: destructive cleanup requires explicit confirmation and supports separate system, image, volume, and full prune actions.
 - **Friendly codebase**: small pure-Python modules, unit tests with subprocess mocking, and CI on Linux, macOS, and Windows.
 
 ## Key Features
 
 - **Zero Dependencies**: Pure Python standard library implementation, no installation of heavy third-party UI/TUI frameworks required.
-- **Dual Tabbed Navigation**:
-  - **📦 Containers Tab**: Real-time listing of active and inactive containers.
-  - **💾 Images Tab**: Clean grid layout showing local Docker images and their size.
+- **Multi-Tab Navigation**:
+  - **Containers Tab**: Real-time listing of active and inactive containers.
+  - **Compose Tab**: Groups containers by Compose project and service labels.
+  - **Images Tab**: Clean grid layout showing local Docker images and their size.
+  - **Volumes Tab**: Browse and delete local Docker volumes.
+  - **Networks Tab**: Browse local Docker networks.
 - **Container Grid Search & Filtering**: Press `/` in the main view to instantly filter containers by name or image. Press `C` to clear the filter.
-- **Interactive Container Execution**: Execute commands inside running containers (`E` key) and scroll through the command outputs in a scrollable console viewer. Re-run commands with `R` or enter new ones with `E`.
+- **Sorting & State Filters**: Cycle sort modes with `O` and state filters with `Y`.
+- **Interactive Container Execution**: Execute preset, recent, or custom commands inside running containers (`E` key) and scroll through the command outputs in a scrollable console viewer.
 - **Quick Rename**: Rename containers instantly (`N` key) with automatic dashboard refresh.
-- **Scrollable Log View**: View and search container logs with an interactive viewport. Supports arrow-key scrolling, keyword filtering (`/`), filter clearing (`C`), and tail limit adjustment (`+`/`-`).
+- **Readable Details View**: Open a structured container summary (`V` key) for ports, mounts, env, labels, networks, and restart policy.
+- **Scrollable Log View**: View and search container logs with an interactive viewport. Supports follow mode, next-match navigation, error-only filtering, search, and tail limit adjustment.
 - **Interactive Configuration Inspect**: Browse detailed container JSON configuration (`I` key) inside a scrollable inspector viewport.
-- **System Disk Usage & Pruning**: Review overall disk space consumed by images, containers, and volumes (`P` key), and trigger safe system cleanup/pruning (`X` key) with real-time feedback.
+- **System Disk Usage & Pruning**: Review overall disk space consumed by images, containers, and volumes (`P` key), then trigger explicit cleanup actions with real-time feedback.
 - **Modern Aesthetics**: Utilizes Unicode double-line frames, block character resource usage bars (`█`/`░`), and ANSI color coding.
 - **Dynamic Layout & Resizing**: Automatically listens to terminal dimensions (`os.get_terminal_size()`) and scales column grids proportionally.
 
@@ -84,25 +90,33 @@ docktui --docker-timeout 15
 ### Hotkeys & Keyboard Navigation
 
 #### Global Controls
-- **`Tab` or `1` / `2`**: Switch between **Containers** and **Images** tabs.
+- **`Tab` or `1`-`5`**: Switch between **Containers**, **Compose**, **Images**, **Volumes**, and **Networks** tabs.
 - **`↑` / `↓` (Arrow Keys)**: Navigate list items.
 - **`G`**: Force refresh data.
 - **`?`**: Open the in-app keyboard help screen.
 - **`Q`**: Exit DockTUI.
 
-#### Containers Tab
+#### Containers & Compose Tabs
 - **`S`**: Start or Stop the selected container.
-- **`R`**: Restart the selected container (or reconnect to Docker daemon if disconnected).
+- **`S` on a Compose project row**: Start or stop all containers in that project group.
+- **`R`**: Restart the selected container or selected Compose project group.
 - **`L`**: Open fullscreen interactive **Logs View**.
+- **`V`**: Open readable **Details View**.
 - **`I`**: Open fullscreen interactive **Inspect View**.
 - **`E`**: Execute a shell command inside the running container (**Exec View**).
 - **`N`**: Rename the selected container.
 - **`/`**: Filter the containers grid by name/image.
 - **`C`**: Clear the active container filter.
+- **`O`**: Cycle sort mode.
+- **`Y`**: Cycle state filter.
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
 
 #### Images Tab
 - **`D`**: Delete the selected image (asks for confirmation).
+- **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
+
+#### Volumes Tab
+- **`D`**: Delete the selected volume (asks for confirmation).
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
 
 #### In-View Navigation (Logs, Inspect, Exec, System Views)
@@ -110,14 +124,20 @@ docktui --docker-timeout 15
 - **`Esc` or View Key**: Return back to the main dashboard.
 - **Logs View Features**:
   - `F`: Toggle follow mode to keep refreshing and pinning logs to the newest lines.
+  - `Space`: Pause follow mode.
   - `/`: Search/filter logs for specific terms.
-  - `C`: Clear active log filter.
+  - `N`: Jump to the next search match.
+  - `E`: Toggle error/warning-only log lines.
+  - `C`: Clear active log filters.
   - `+` / `-`: Increase/decrease log line retrieval limits.
 - **Exec View Features**:
   - `R`: Re-run the current command.
-  - `E`: Execute a new command.
+  - `E`: Execute a new preset, recent, or custom command.
 - **System View Features**:
-  - `X`: Trigger `docker system prune -f` after typing `PRUNE` to confirm cleanup of unused containers, networks, and images.
+  - `X`: Trigger `docker system prune -f` after typing `PRUNE`.
+  - `I`: Trigger `docker image prune -f` after typing `IMAGES`.
+  - `V`: Trigger `docker volume prune -f` after typing `VOLUMES`.
+  - `A`: Trigger `docker system prune -f --volumes` after typing `ALL`.
 
 ---
 
@@ -145,7 +165,7 @@ On Windows, `py -m unittest discover tests` also works when the Python launcher 
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned improvements, including follow-mode logs, Docker Compose grouping, image prune flows, command presets, and theme polish.
+See [ROADMAP.md](ROADMAP.md) for planned improvements, including richer Compose actions, detail views, export workflows, and theme polish.
 
 ## Releases
 

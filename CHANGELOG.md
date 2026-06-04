@@ -6,13 +6,20 @@ All notable changes to DockTUI are documented here.
 
 ### Added
 - Containers dashboard with start, stop, restart, inspect, logs, exec, rename, and filtering workflows.
+- Compose-aware tab that groups containers by Docker Compose project and service labels.
 - Docker images tab with local image listing and deletion.
+- Docker volumes and networks tabs.
 - Docker system disk usage and prune view.
+- Separate system, image, volume, and full prune confirmations.
 - Scrollable log, inspect, and exec output views.
+- Readable container details view for ports, mounts, env, labels, networks, and restart policy.
 - Cross-platform unit test workflow for GitHub Actions.
 - `--version`, `--refresh-interval`, and `--docker-timeout` CLI options.
 - In-app help screen via `?`.
 - Follow-mode logs via `F`.
+- Log next-match navigation and error/warning-only filtering.
+- Exec command presets and session command history.
+- Container sorting and state filters.
 
 ### Changed
 - Docker daemon checks are cached so the render loop stays responsive.

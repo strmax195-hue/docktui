@@ -4,18 +4,17 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 
 ## Near term
 
-- Docker Compose grouping by project and service labels.
-- Safer image cleanup flow with dangling-only and selected-image prune modes.
-- Saved exec command presets such as `sh`, `bash`, `env`, and `ls -la`.
 - Better empty states when Docker is installed but no containers or images exist.
+- Richer Compose actions such as logs for an entire service group.
+- Export logs, inspect JSON, and details output to local files.
+- Wider test coverage for interactive TUI state transitions.
 
 ## Later
 
 - Theme presets for light, dark, and high-contrast terminals.
-- Container detail sidebar with ports, mounts, labels, and restart policy.
-- Optional export of inspect/log output to a local file.
-- Keyboard help overlay.
-- Wider test coverage for TUI state transitions.
+- Optional config file for default refresh interval, log tail, and exec presets.
+- Docker context display and context switching.
+- Optional mouse support for terminals that expose it.
 
 ## Feedback wanted
 

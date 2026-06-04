@@ -37,7 +37,11 @@ class TestDockerClient(unittest.TestCase):
         self.client.docker_bin = "docker"
         
         # Mock output of 'docker ps -a --format ...'
-        mock_stdout = "c123|web-app|running|Up 2 hours|nginx:alpine\nd456|db-dev|exited|Exited (0) 5m ago|postgres:15\n"
+        mock_stdout = (
+            "c123|web-app|running|Up 2 hours|nginx:alpine|"
+            "com.docker.compose.project=myapp,com.docker.compose.service=web|8080->80|2026-01-01\n"
+            "d456|db-dev|exited|Exited (0) 5m ago|postgres:15||5432->5432|2026-01-01\n"
+        )
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
         
         containers = self.client.list_containers()
@@ -48,6 +52,9 @@ class TestDockerClient(unittest.TestCase):
         self.assertEqual(containers[0]["state"], "running")
         self.assertEqual(containers[0]["status"], "Up 2 hours")
         self.assertEqual(containers[0]["image"], "nginx:alpine")
+        self.assertEqual(containers[0]["compose_project"], "myapp")
+        self.assertEqual(containers[0]["compose_service"], "web")
+        self.assertEqual(containers[0]["ports"], "8080->80")
 
         self.assertEqual(containers[1]["id"], "d456")
         self.assertEqual(containers[1]["name"], "db-dev")
@@ -96,6 +103,9 @@ class TestDockerClient(unittest.TestCase):
         prune_res = self.client.prune_system()
         self.assertEqual(prune_res, mock_stdout)
 
+        self.client.prune_system(include_volumes=True)
+        self.assertIn("--volumes", mock_run.call_args.args[0])
+
     @patch("subprocess.run")
     def test_list_images(self, mock_run):
         self.client.docker_bin = "docker"
@@ -108,6 +118,26 @@ class TestDockerClient(unittest.TestCase):
         self.assertEqual(images[0]["repository"], "nginx")
         self.assertEqual(images[0]["tag"], "latest")
         self.assertEqual(images[0]["size"], "142MB")
+
+    @patch("subprocess.run")
+    def test_list_volumes(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="app_data|local|local\n")
+
+        volumes = self.client.list_volumes()
+
+        self.assertEqual(volumes[0]["name"], "app_data")
+        self.assertEqual(volumes[0]["driver"], "local")
+
+    @patch("subprocess.run")
+    def test_list_networks(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="abc123|bridge|bridge|local\n")
+
+        networks = self.client.list_networks()
+
+        self.assertEqual(networks[0]["name"], "bridge")
+        self.assertEqual(networks[0]["driver"], "bridge")
 
     @patch("subprocess.run")
     def test_remove_image(self, mock_run):
@@ -161,6 +191,37 @@ class TestDockerClient(unittest.TestCase):
         output = self.client.exec_command("c123", 'sh -c "echo')
 
         self.assertIn("Invalid command", output)
+
+    @patch("subprocess.run")
+    def test_get_container_details(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='''[{
+                "Id": "c1234567890abcdef",
+                "Name": "/web",
+                "Created": "2026-01-01T00:00:00Z",
+                "Config": {
+                    "Image": "nginx:alpine",
+                    "Env": ["APP_ENV=dev"],
+                    "Labels": {"com.docker.compose.project": "myapp"}
+                },
+                "State": {"Status": "running", "Running": true},
+                "HostConfig": {"RestartPolicy": {"Name": "unless-stopped"}},
+                "NetworkSettings": {
+                    "Ports": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]},
+                    "Networks": {"myapp_default": {}}
+                },
+                "Mounts": [{"Source": "/host", "Destination": "/app", "Mode": "rw"}]
+            }]'''
+        )
+
+        details = self.client.get_container_details("c123")
+
+        self.assertEqual(details["name"], "web")
+        self.assertEqual(details["image"], "nginx:alpine")
+        self.assertIn("8080", details["ports"])
+        self.assertIn("myapp_default", details["networks"])
 
     @patch("subprocess.run")
     def test_get_logs_reports_timeout(self, mock_run):
