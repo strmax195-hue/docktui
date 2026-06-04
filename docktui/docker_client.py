@@ -69,7 +69,7 @@ class DockerClient:
 
         cmd = [
             self.docker_bin, "stats", "--no-stream",
-            "--format", "{{.Container}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}"
+            "--format", "{{.Container}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}"
         ]
 
         stats_dict = {}
@@ -79,12 +79,13 @@ class DockerClient:
                 if not line:
                     continue
                 parts = line.split("|")
-                if len(parts) >= 4:
+                if len(parts) >= 5:
                     container_id = parts[0]
                     stats_dict[container_id] = {
                         "cpu": parts[1],
                         "memory": parts[2],
-                        "net": parts[3]
+                        "mem_perc": parts[3],
+                        "net": parts[4]
                     }
             return stats_dict
         except subprocess.CalledProcessError:
@@ -136,3 +137,19 @@ class DockerClient:
             return res.stdout or res.stderr or "(no logs available)"
         except Exception as e:
             return f"Error reading logs: {str(e)}"
+
+    def inspect_container(self, container_id: str) -> str:
+        """Fetches detailed inspection JSON for a container."""
+        if not self.is_docker_installed():
+            return "Docker not installed."
+        try:
+            res = subprocess.run(
+                [self.docker_bin, "inspect", container_id],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            return res.stdout or res.stderr or "No inspect data."
+        except Exception as e:
+            return f"Error inspecting container: {str(e)}"

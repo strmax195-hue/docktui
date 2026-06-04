@@ -71,14 +71,41 @@ class ContainerDashboard:
         self.containers: List[Dict[str, str]] = []
         self.stats: Dict[str, Dict[str, str]] = {}
         self.selected_index = 0
-        self.view_mode = "main"  # 'main' or 'logs'
+        self.view_mode = "main"  # 'main', 'logs', or 'inspect'
         self.status_message = "Welcome to DockTUI! Use arrow keys to navigate."
         self.status_time = time.time()
         self.last_refresh = 0.0
+        self.log_filter = ""
+        self.inspect_lines: List[str] = []
+        self.inspect_scroll_index = 0
 
     def set_status(self, msg: str):
         self.status_message = msg
         self.status_time = time.time()
+
+    def prompt_user(self, prompt_text: str) -> str:
+        """Prompts the user for text input in a clean way."""
+        print(f"\r\033[K{YELLOW}{BOLD}{prompt_text}{RESET}", end="", flush=True)
+        try:
+            # Flush key buffer to prevent old keys from entering input
+            if PLATFORM == "windows":
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+            return input().strip()
+        except Exception:
+            return ""
+
+    def get_percentage_bar(self, percentage_str: str, width: int = 15) -> str:
+        """Generates a beautiful block progress bar for resource usage."""
+        try:
+            val = float(percentage_str.replace('%', '').strip())
+            val = max(0.0, min(100.0, val))
+            filled_len = int(round(width * val / 100.0))
+            bar = "█" * filled_len + "░" * (width - filled_len)
+            return f"[{bar}] {percentage_str}"
+        except Exception:
+            # Fallback if loading or N/A
+            return f"[░░░░░░░░░░░░░░░] {percentage_str}"
 
     def refresh_data(self):
         """Fetches fresh container info and stats from the client."""
@@ -99,9 +126,9 @@ class ContainerDashboard:
         print("\033[2J\033[H", end="")
 
         # Title block
-        print(f"{CYAN}{BOLD}┌──────────────────────────────────────────────────────────────┐{RESET}")
-        print(f"{CYAN}{BOLD}│                     DockTUI Container Dashboard              │{RESET}")
-        print(f"{CYAN}{BOLD}└──────────────────────────────────────────────────────────────┘{RESET}")
+        print(f"{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
+        print(f"{CYAN}{BOLD}║                     DockTUI Container Dashboard              ║{RESET}")
+        print(f"{CYAN}{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
         
         # Check if Docker is available
         if not self.client.is_docker_installed():
@@ -124,7 +151,7 @@ class ContainerDashboard:
 
         # Table headers
         print(f"{BOLD}{'ID':<12} {'NAME':<20} {'IMAGE':<18} {'STATE':<10} {'STATUS':<15}{RESET}")
-        print("-" * 78)
+        print("─" * 78)
 
         # Render list of containers
         for idx, c in enumerate(self.containers):
@@ -150,7 +177,7 @@ class ContainerDashboard:
             line = f"{style}{c['id'][:10]:<12} {name_str:<20} {c['image'][:18]:<18} {state_formatted:<10} {c['status'][:15]:<15}{RESET}"
             print(line)
 
-        print("-" * 78)
+        print("─" * 78)
 
         # Render Stats section for selected container
         if self.containers:
@@ -160,23 +187,25 @@ class ContainerDashboard:
             
             c_stats = self.stats.get(c_id) or self.stats.get(sel["name"])
             if c_stats and sel["state"] == "running":
-                print(f"  CPU:  {GREEN}{c_stats['cpu']}{RESET}")
-                print(f"  MEM:  {GREEN}{c_stats['memory']}{RESET}")
+                cpu_bar = self.get_percentage_bar(c_stats['cpu'])
+                mem_bar = self.get_percentage_bar(c_stats['mem_perc'])
+                print(f"  CPU:  {GREEN}{cpu_bar}{RESET}")
+                print(f"  MEM:  {GREEN}{mem_bar} ({c_stats['memory']}){RESET}")
                 print(f"  NET:  {GREEN}{c_stats['net']}{RESET}")
             else:
                 status_text = "N/A (container stopped)" if sel["state"] != "running" else "Loading stats..."
                 print(f"  Usage statistics: {YELLOW}{status_text}{RESET}")
 
         # Render status line at bottom
-        print("\n" + "=" * 78)
+        print("\n" + "═" * 78)
         # Clear status message if old
         if time.time() - self.status_time > 4:
             self.status_message = "Use Arrow keys to select. Auto-refreshing every 2s."
         print(f"{BOLD}Status:{RESET} {self.status_message}")
-        print("=" * 78)
+        print("═" * 78)
         
         # Action instructions
-        print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] View Logs | [G] Pull/Refresh | [Q] Quit{RESET}")
+        print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [G] Refresh | [Q] Quit{RESET}")
 
     def draw_logs_view(self):
         """Renders the fullscreen log viewer screen."""
@@ -186,14 +215,50 @@ class ContainerDashboard:
 
         sel = self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
-        print(f"{CYAN}{BOLD}┌──────────────────────────────────────────────────────────────┐{RESET}")
-        print(f"{CYAN}{BOLD}│ LOGS: {sel['name']:<54} │{RESET}")
-        print(f"{CYAN}{BOLD}└──────────────────────────────────────────────────────────────┘{RESET}")
+        print(f"{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
+        filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
+        title_text = f"LOGS: {sel['name']}{filter_status}"
+        print(f"{CYAN}{BOLD}║ {title_text:<58} ║{RESET}")
+        print(f"{CYAN}{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
         
-        logs = self.client.get_logs(sel["id"], tail=30)
-        print(logs)
-        print("\n" + "=" * 78)
-        print(f"{CYAN}Press any key or [L] to return to dashboard. Press [G] to refresh logs.{RESET}")
+        raw_logs = self.client.get_logs(sel["id"], tail=150)
+        log_lines = raw_logs.strip().split("\n")
+        
+        # Filter lines if keyword is active
+        if self.log_filter:
+            filtered_lines = [line for line in log_lines if self.log_filter.lower() in line.lower()]
+            if not filtered_lines:
+                filtered_lines = [f"{YELLOW}(No logs match filter '{self.log_filter}'){RESET}"]
+            display_logs = "\n".join(filtered_lines[-30:])
+        else:
+            display_logs = "\n".join(log_lines[-30:])
+
+        print(display_logs)
+        print("\n" + "═" * 78)
+        print(f"{CYAN}[/] Filter logs | [C] Clear filter | [G] Refresh | [Any other key] Back to dashboard{RESET}")
+
+    def draw_inspect_view(self):
+        """Renders the scrollable inspect JSON screen."""
+        if not self.containers:
+            self.view_mode = "main"
+            return
+
+        sel = self.containers[self.selected_index]
+        print("\033[2J\033[H", end="")
+        print(f"{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
+        title_text = f"INSPECT: {sel['name']} (Line {self.inspect_scroll_index + 1} of {len(self.inspect_lines)})"
+        print(f"{CYAN}{BOLD}║ {title_text:<58} ║{RESET}")
+        print(f"{CYAN}{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
+
+        # Viewport size (e.g. 24 lines)
+        viewport_height = 24
+        end_idx = min(len(self.inspect_lines), self.inspect_scroll_index + viewport_height)
+        
+        for i in range(self.inspect_scroll_index, end_idx):
+            print(self.inspect_lines[i][:78]) # Trim line width to match box width
+            
+        print("\n" + "═" * 78)
+        print(f"{CYAN}[↑/↓] Scroll | [Esc] or [I] Return to dashboard{RESET}")
 
     def run(self):
         """The main dashboard control loop."""
@@ -207,6 +272,8 @@ class ContainerDashboard:
                 self.draw_main_view()
             elif self.view_mode == "logs":
                 self.draw_logs_view()
+            elif self.view_mode == "inspect":
+                self.draw_inspect_view()
 
             # Auto-refresh main dashboard every 2 seconds
             if self.view_mode == "main" and (time.time() - self.last_refresh > 2.0):
@@ -219,10 +286,26 @@ class ContainerDashboard:
                     if key == "g":
                         # Refresh logs
                         pass
+                    elif key == "/":
+                        query = self.prompt_user("Enter search term: ")
+                        self.log_filter = query
+                    elif key == "c":
+                        self.log_filter = ""
+                        self.set_status("Cleared log filter.")
                     else:
                         self.view_mode = "main"
+                elif self.view_mode == "inspect":
+                    if key == "up":
+                        if self.inspect_scroll_index > 0:
+                            self.inspect_scroll_index -= 1
+                    elif key == "down":
+                        # Allow scrolling if there are more lines than the viewport
+                        if self.inspect_scroll_index < len(self.inspect_lines) - 24:
+                            self.inspect_scroll_index += 1
+                    elif key in ("i", "\x1b"):  # 'i' or 'Esc'
+                        self.view_mode = "main"
                 else:
-                    # Dashboard controls
+                    # Dashboard controls (main view)
                     if key == "q":
                         running = False
                     elif key == "up":
@@ -236,7 +319,17 @@ class ContainerDashboard:
                         self.refresh_data()
                     elif key == "l":
                         if self.containers:
+                            self.log_filter = ""  # Reset log filter on enter
                             self.view_mode = "logs"
+                    elif key == "i":
+                        if self.containers:
+                            sel = self.containers[self.selected_index]
+                            self.set_status(f"Inspecting container {sel['name']}...")
+                            self.draw_main_view()
+                            inspect_data = self.client.inspect_container(sel["id"])
+                            self.inspect_lines = inspect_data.split("\n")
+                            self.inspect_scroll_index = 0
+                            self.view_mode = "inspect"
                     elif key == "r":
                         # Attempt to reconnect daemon or restart container
                         if not self.client.is_daemon_running():

@@ -55,15 +55,26 @@ class TestDockerClient(unittest.TestCase):
     def test_get_container_stats(self, mock_run):
         self.client.docker_bin = "docker"
         
-        # Mock output of 'docker stats --no-stream ...'
-        mock_stdout = "c123|1.25%|25.4MiB / 7.84GiB|1.2kB / 0B\n"
+        # Mock output of 'docker stats --no-stream ...' (now 5 columns with MemPerc)
+        mock_stdout = "c123|1.25%|25.4MiB / 7.84GiB|0.32%|1.2kB / 0B\n"
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
         
         stats = self.client.get_container_stats()
         self.assertIn("c123", stats)
         self.assertEqual(stats["c123"]["cpu"], "1.25%")
         self.assertEqual(stats["c123"]["memory"], "25.4MiB / 7.84GiB")
+        self.assertEqual(stats["c123"]["mem_perc"], "0.32%")
         self.assertEqual(stats["c123"]["net"], "1.2kB / 0B")
+
+    @patch("subprocess.run")
+    def test_inspect_container(self, mock_run):
+        self.client.docker_bin = "docker"
+        
+        mock_stdout = '[{"Id": "c123", "Name": "/web-app"}]'
+        mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
+        
+        inspect_data = self.client.inspect_container("c123")
+        self.assertEqual(inspect_data, mock_stdout)
 
 if __name__ == "__main__":
     unittest.main()
