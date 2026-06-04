@@ -74,14 +74,20 @@ class ContainerDashboard:
         self.selected_index = 0
         self.selected_image_index = 0
         self.current_tab = "containers"  # "containers" or "images"
-        self.view_mode = "main"  # 'main', 'logs', 'inspect', or 'system'
+        self.view_mode = "main"  # 'main', 'logs', 'inspect', 'system', or 'exec'
         self.status_message = "Welcome to DockTUI! Use Tab or 1/2 keys to switch tabs."
         self.status_time = time.time()
         self.last_refresh = 0.0
         self.log_filter = ""
+        self.container_filter = ""
         self.inspect_lines: List[str] = []
         self.inspect_scroll_index = 0
         self.log_tail_limit = 40
+        self.log_lines: List[str] = []
+        self.log_scroll_index = 0
+        self.exec_output_lines: List[str] = []
+        self.exec_scroll_index = 0
+        self.exec_command_text = ""
         self.system_info_text = ""
 
     def set_status(self, msg: str):
@@ -116,6 +122,12 @@ class ContainerDashboard:
         """Fetches fresh docker data based on active tab."""
         if self.current_tab == "containers":
             self.containers = self.client.list_containers()
+            if self.container_filter:
+                self.containers = [
+                    c for c in self.containers
+                    if self.container_filter.lower() in c["name"].lower()
+                    or self.container_filter.lower() in c["image"].lower()
+                ]
             if self.containers:
                 self.stats = self.client.get_container_stats()
                 if self.selected_index >= len(self.containers):
@@ -166,8 +178,9 @@ class ContainerDashboard:
             return
 
         # Render Tab Headers
+        filter_status = f"    [Filter: {self.container_filter}]" if self.container_filter else ""
         if self.current_tab == "containers":
-            print(f" {WHITE_ON_BLUE} 📦 Containers (1) {RESET}   [💾 Images (2)]")
+            print(f" {WHITE_ON_BLUE} 📦 Containers (1) {RESET}   [💾 Images (2)]{filter_status}")
         else:
             print(f" [📦 Containers (1)]   {WHITE_ON_BLUE} 💾 Images (2) {RESET}")
         print("─" * (width - 1))
@@ -181,7 +194,11 @@ class ContainerDashboard:
         if self.current_tab == "containers":
             if not self.containers:
                 print(f"\n{CYAN}No Docker containers found on this system.{RESET}")
-                print("Create some containers using 'docker run' to see them here.")
+                if self.container_filter:
+                    print(f"No containers match the active filter: '{self.container_filter}'")
+                    print("Press [C] to clear the filter.")
+                else:
+                    print("Create some containers using 'docker run' to see them here.")
             else:
                 # Calculate column widths dynamically based on terminal width
                 rem = width - 26
@@ -274,7 +291,7 @@ class ContainerDashboard:
         
         # Action instructions depending on the active tab
         if self.current_tab == "containers":
-            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [P] Disk/Prune | [Tab] Tab | [G] Refresh | [Q] Quit{RESET}")
+            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [E] Exec | [N] Rename | [/] Filter | [P] Disk/Prune | [Q] Quit{RESET}")
         else:
             print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch Tab | [G] Refresh | [Q] Quit{RESET}")
 
@@ -295,9 +312,22 @@ class ContainerDashboard:
         sel = self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
         
+        # Pull logs if not loaded
+        viewport_height = height - 6
+        if not self.log_lines:
+            raw_logs = self.client.get_logs(sel["id"], tail=self.log_tail_limit)
+            log_lines = raw_logs.split("\n")
+            if self.log_filter:
+                self.log_lines = [line for line in log_lines if self.log_filter.lower() in line.lower()]
+                if not self.log_lines:
+                    self.log_lines = [f"{YELLOW}(No logs match filter '{self.log_filter}'){RESET}"]
+            else:
+                self.log_lines = log_lines
+            self.log_scroll_index = max(0, len(self.log_lines) - viewport_height)
+
         filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
         limit_status = f" [LIMIT: {self.log_tail_limit} lines]"
-        title_text = f"LOGS: {sel['name']}{filter_status}{limit_status}"
+        title_text = f"LOGS: {sel['name']}{filter_status}{limit_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
         
@@ -305,25 +335,16 @@ class ContainerDashboard:
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
         
-        # Pull enough logs to satisfy our limit + filtering
-        raw_logs = self.client.get_logs(sel["id"], tail=self.log_tail_limit + 100)
-        log_lines = raw_logs.strip().split("\n")
-        
-        # Filter lines if keyword is active
-        if self.log_filter:
-            filtered_lines = [line for line in log_lines if self.log_filter.lower() in line.lower()]
-            if not filtered_lines:
-                filtered_lines = [f"{YELLOW}(No logs match filter '{self.log_filter}'){RESET}"]
-            # Show up to viewport height - 6 lines
-            viewport_lines = filtered_lines[-(height - 6):]
-        else:
-            viewport_lines = log_lines[-(height - 6):]
+        end_idx = min(len(self.log_lines), self.log_scroll_index + viewport_height)
+        for i in range(self.log_scroll_index, end_idx):
+            print(self.log_lines[i][:width-1])
+            
+        # Pad with empty lines if viewport not full
+        for _ in range(viewport_height - (end_idx - self.log_scroll_index)):
+            print("")
 
-        display_logs = "\n".join(line[:width-1] for line in viewport_lines)
-        print(display_logs)
-        
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[/] Filter | [C] Clear Filter | [+/-] Limit logs | [G] Refresh | [Esc/Other] Back{RESET}")
+        print(f"{CYAN}[↑/↓] Scroll | [/] Filter | [C] Clear Filter | [+/-] Limit logs | [G] Refresh | [Esc/L] Back{RESET}")
 
     def draw_inspect_view(self):
         """Renders the scrollable inspect JSON screen."""
@@ -385,6 +406,45 @@ class ContainerDashboard:
         print("\n" + "═" * (width - 1))
         print(f"{CYAN}[X] Run Prune (clean unused containers/images) | [Esc/P] Return to dashboard{RESET}")
 
+    def draw_exec_view(self):
+        """Renders the scrollable command execution output screen."""
+        if not self.containers:
+            self.view_mode = "main"
+            return
+
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+            height = max(24, terminal_size.lines)
+        except Exception:
+            width = 80
+            height = 24
+
+        sel = self.containers[self.selected_index]
+        print("\033[2J\033[H", end="")
+        
+        title_text = f"EXEC OUT: {sel['name']} > {self.exec_command_text[:30]} (Line {self.exec_scroll_index + 1} of {len(self.exec_output_lines)})"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+        
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
+
+        # Viewport size (lines available for content)
+        viewport_height = height - 6
+        end_idx = min(len(self.exec_output_lines), self.exec_scroll_index + viewport_height)
+        
+        for i in range(self.exec_scroll_index, end_idx):
+            print(self.exec_output_lines[i][:width-1])
+            
+        # Pad with empty lines if not full
+        for _ in range(viewport_height - (end_idx - self.exec_scroll_index)):
+            print("")
+            
+        print("\n" + "═" * (width - 1))
+        print(f"{CYAN}[↑/↓] Scroll | [R] Run command again | [E] Run different command | [Esc] Return to dashboard{RESET}")
+
     def run(self):
         """The main dashboard control loop."""
         init_terminal()
@@ -407,6 +467,8 @@ class ContainerDashboard:
                 self.draw_inspect_view()
             elif self.view_mode == "system":
                 self.draw_system_view()
+            elif self.view_mode == "exec":
+                self.draw_exec_view()
 
             # Auto-refresh main dashboard every 2 seconds
             if self.view_mode == "main" and (time.time() - self.last_refresh > 2.0):
@@ -416,20 +478,30 @@ class ContainerDashboard:
             key = get_key_nonblocking()
             if key:
                 if self.view_mode == "logs":
-                    if key == "g":
-                        # Refresh logs is handled by loop redrawing
-                        pass
+                    if key == "up":
+                        if self.log_scroll_index > 0:
+                            self.log_scroll_index -= 1
+                    elif key == "down":
+                        if self.log_scroll_index < len(self.log_lines) - viewport_h:
+                            self.log_scroll_index += 1
+                    elif key == "g":
+                        self.log_lines = []
+                        self.set_status("Logs refreshed.")
                     elif key == "/":
                         query = self.prompt_user("Enter search term: ")
                         self.log_filter = query
+                        self.log_lines = []
                     elif key == "c":
                         self.log_filter = ""
+                        self.log_lines = []
                         self.set_status("Cleared log filter.")
                     elif key in ("+", "="):
                         self.log_tail_limit = min(500, self.log_tail_limit + 10)
+                        self.log_lines = []
                         self.set_status(f"Increased log limit to {self.log_tail_limit} lines.")
                     elif key == "-":
                         self.log_tail_limit = max(10, self.log_tail_limit - 10)
+                        self.log_lines = []
                         self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
                     elif key in ("q", "l", "\x1b"):
                         self.view_mode = "main"
@@ -456,6 +528,34 @@ class ContainerDashboard:
                         self.system_info_text = ""  # Force refresh df
                         self.refresh_data()
                     elif key in ("p", "\x1b"):
+                        self.view_mode = "main"
+                elif self.view_mode == "exec":
+                    if key == "up":
+                        if self.exec_scroll_index > 0:
+                            self.exec_scroll_index -= 1
+                    elif key == "down":
+                        if self.exec_scroll_index < len(self.exec_output_lines) - viewport_h:
+                            self.exec_scroll_index += 1
+                    elif key == "r":
+                        if self.containers:
+                            sel = self.containers[self.selected_index]
+                            self.set_status(f"Running command: {self.exec_command_text}...")
+                            self.draw_exec_view()
+                            output = self.client.exec_command(sel["id"], self.exec_command_text)
+                            self.exec_output_lines = output.split("\n")
+                            self.exec_scroll_index = 0
+                    elif key == "e":
+                        if self.containers:
+                            sel = self.containers[self.selected_index]
+                            command = self.prompt_user(f"Command to run inside {sel['name']}: ")
+                            if command:
+                                self.exec_command_text = command
+                                self.set_status(f"Running command: {command}...")
+                                self.draw_exec_view()
+                                output = self.client.exec_command(sel["id"], command)
+                                self.exec_output_lines = output.split("\n")
+                                self.exec_scroll_index = 0
+                    elif key in ("q", "\x1b"):
                         self.view_mode = "main"
                 else:
                     # Dashboard controls (main view)
@@ -487,12 +587,24 @@ class ContainerDashboard:
                     elif key == "g":
                         self.set_status("Refreshing data...")
                         self.refresh_data()
+                    elif key == "/":
+                        query = self.prompt_user("Filter containers (name/image): ")
+                        self.container_filter = query
+                        self.selected_index = 0
+                        self.set_status(f"Filter set to: '{query}'")
+                        self.refresh_data()
+                    elif key == "c":
+                        self.container_filter = ""
+                        self.selected_index = 0
+                        self.set_status("Cleared container filter.")
+                        self.refresh_data()
                     elif key == "p":
                         self.system_info_text = ""  # Reset system stats on enter
                         self.view_mode = "system"
                     elif key == "l" and self.current_tab == "containers":
                         if self.containers:
                             self.log_filter = ""  # Reset log filter on enter
+                            self.log_lines = []   # Force reload logs
                             self.view_mode = "logs"
                     elif key == "i" and self.current_tab == "containers":
                         if self.containers:
@@ -503,6 +615,34 @@ class ContainerDashboard:
                             self.inspect_lines = inspect_data.split("\n")
                             self.inspect_scroll_index = 0
                             self.view_mode = "inspect"
+                    elif key == "e" and self.current_tab == "containers":
+                        if self.containers:
+                            sel = self.containers[self.selected_index]
+                            if sel["state"] != "running":
+                                self.set_status(f"Error: Container {sel['name']} is not running.")
+                            else:
+                                command = self.prompt_user(f"Command to run inside {sel['name']}: ")
+                                if command:
+                                    self.exec_command_text = command
+                                    self.set_status(f"Running command: {command}...")
+                                    self.draw_main_view()
+                                    output = self.client.exec_command(sel["id"], command)
+                                    self.exec_output_lines = output.split("\n")
+                                    self.exec_scroll_index = 0
+                                    self.view_mode = "exec"
+                    elif key == "n" and self.current_tab == "containers":
+                        if self.containers:
+                            sel = self.containers[self.selected_index]
+                            new_name = self.prompt_user(f"New name for container {sel['name']}: ")
+                            if new_name:
+                                self.set_status(f"Renaming container {sel['name']} to {new_name}...")
+                                self.draw_main_view()
+                                success, msg = self.client.rename_container(sel["id"], new_name)
+                                if success:
+                                    self.set_status(f"Successfully renamed to {new_name}.")
+                                else:
+                                    self.set_status(f"Rename failed: {msg}")
+                                self.refresh_data()
                     elif key == "r" and self.current_tab == "containers":
                         # Attempt to reconnect daemon or restart container
                         if not self.client.is_daemon_running():

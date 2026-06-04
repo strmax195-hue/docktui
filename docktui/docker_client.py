@@ -235,3 +235,43 @@ class DockerClient:
                 return False, res.stderr or f"Failed to remove image {image_id}."
         except Exception as e:
             return False, f"Error removing image: {str(e)}"
+
+    def rename_container(self, container_id: str, new_name: str) -> Tuple[bool, str]:
+        """Renames an existing container."""
+        if not self.is_docker_installed():
+            return False, "Docker not installed."
+        try:
+            res = subprocess.run(
+                [self.docker_bin, "rename", container_id, new_name],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            if res.returncode == 0:
+                return True, f"Successfully renamed container to {new_name}."
+            else:
+                return False, res.stderr or f"Failed to rename container to {new_name}."
+        except Exception as e:
+            return False, f"Error renaming container: {str(e)}"
+
+    def exec_command(self, container_id: str, command: str) -> str:
+        """Executes a single command inside a running container."""
+        if not self.is_docker_installed():
+            return "Docker not installed."
+        cmd_parts = command.split()
+        if not cmd_parts:
+            return "Empty command."
+        
+        cmd = [self.docker_bin, "exec", container_id] + cmd_parts
+        try:
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            return res.stdout or res.stderr or "(Command executed with no output)"
+        except Exception as e:
+            return f"Error executing command: {str(e)}"

@@ -116,5 +116,29 @@ class TestDockerClient(unittest.TestCase):
         self.assertTrue(success)
         self.assertIn("Successfully removed image", msg)
 
+    @patch("subprocess.run")
+    def test_rename_container(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        
+        success, msg = self.client.rename_container("c123", "new-web-app")
+        self.assertTrue(success)
+        self.assertIn("Successfully renamed container", msg)
+
+        # Test failure case
+        mock_run.return_value = MagicMock(returncode=1, stderr="Error: name already in use")
+        success, msg = self.client.rename_container("c123", "new-web-app")
+        self.assertFalse(success)
+        self.assertIn("Error: name already in use", msg)
+
+    @patch("subprocess.run")
+    def test_exec_command(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="bin\nboot\ndev\netc\n")
+        
+        output = self.client.exec_command("c123", "ls /")
+        self.assertIn("bin", output)
+        self.assertIn("boot", output)
+
 if __name__ == "__main__":
     unittest.main()
