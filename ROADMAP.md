@@ -21,11 +21,18 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 
 - Theme presets for light, dark, and high-contrast terminals.
 - Optional config file for default refresh interval, log tail, and exec presets.
+- Filter and search (`/` key) support across all tabs (Images, Volumes, Networks, Contexts).
+- High-resource warning alerts (visual indicators when container CPU/Memory usage is extremely high).
 
 ## Later
 
-- Optional project-level config for saved commands and preferred tab/sort mode.
-- Additional Compose actions (e.g. up, down, build, restart projects directly).
+- Interactive terminal execution sessions (`docker exec -it` inside DockTUI by temporarily restoring standard tty input).
+- Real-time streaming logs (`docker logs -f` via non-blocking stream readers).
+- Extended Compose lifecycle actions (e.g. build, down, up --build directly from Compose tab).
+- Container IP address and subnet display within the Details view.
+- Reverse-engineering generator (exporting selected container to a `docker-compose.yml` snippet).
+- Support for remote Docker daemons via SSH/TCP (proper `DOCKER_HOST` parsing).
+
 
 
 ## Feedback wanted
