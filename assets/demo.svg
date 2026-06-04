@@ -1,39 +1,77 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="640" viewBox="0 0 1100 640" role="img" aria-labelledby="title desc">
   <title id="title">DockTUI terminal preview</title>
-  <desc id="desc">A terminal-style preview of DockTUI showing container rows, resource bars, and available actions.</desc>
-  <rect width="980" height="560" fill="#111317"/>
-  <rect x="24" y="24" width="932" height="512" rx="10" fill="#171a20" stroke="#343a46" stroke-width="2"/>
-  <rect x="24" y="24" width="932" height="38" rx="10" fill="#242936"/>
+  <desc id="desc">A terminal-style preview of DockTUI showing Compose grouping, container details, advanced logs, volumes, networks, and cleanup actions.</desc>
+  <rect width="1100" height="640" fill="#101216"/>
+  <rect x="24" y="24" width="1052" height="592" rx="10" fill="#171a20" stroke="#343a46" stroke-width="2"/>
+  <rect x="24" y="24" width="1052" height="38" rx="10" fill="#242936"/>
   <circle cx="48" cy="43" r="6" fill="#ff5f56"/>
   <circle cx="70" cy="43" r="6" fill="#ffbd2e"/>
   <circle cx="92" cy="43" r="6" fill="#27c93f"/>
-  <text x="490" y="48" text-anchor="middle" font-family="Consolas, Menlo, monospace" font-size="15" fill="#cfd6e6">docktui</text>
-  <text x="490" y="96" text-anchor="middle" font-family="Consolas, Menlo, monospace" font-size="22" font-weight="700" fill="#67e8f9">DockTUI Container Dashboard</text>
-  <rect x="52" y="122" width="170" height="30" rx="4" fill="#2563eb"/>
-  <text x="70" y="142" font-family="Consolas, Menlo, monospace" font-size="15" fill="#ffffff">Containers (1)</text>
-  <text x="242" y="142" font-family="Consolas, Menlo, monospace" font-size="15" fill="#aab4c4">Images (2)</text>
-  <line x1="52" y1="170" x2="928" y2="170" stroke="#3f4654"/>
-  <text x="62" y="200" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">ID</text>
-  <text x="194" y="200" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">NAME</text>
-  <text x="386" y="200" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">IMAGE</text>
-  <text x="610" y="200" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">STATE</text>
-  <text x="720" y="200" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">STATUS</text>
-  <rect x="52" y="218" width="876" height="34" rx="4" fill="#1d4ed8"/>
-  <text x="62" y="240" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">c1234abcde</text>
-  <text x="194" y="240" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">» web-app</text>
-  <text x="386" y="240" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">nginx:alpine</text>
-  <text x="610" y="240" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">running</text>
-  <text x="720" y="240" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">Up 2 hours</text>
-  <text x="62" y="284" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">d4567def89</text>
-  <text x="194" y="284" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">  db-dev</text>
-  <text x="386" y="284" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">postgres:15</text>
-  <text x="610" y="284" font-family="Consolas, Menlo, monospace" font-size="14" fill="#f87171">exited</text>
-  <text x="720" y="284" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">Exited 5m ago</text>
-  <line x1="52" y1="318" x2="928" y2="318" stroke="#3f4654"/>
-  <text x="62" y="356" font-family="Consolas, Menlo, monospace" font-size="16" font-weight="700" fill="#67e8f9">CONTAINER RESOURCE USAGE:</text>
-  <text x="82" y="392" font-family="Consolas, Menlo, monospace" font-size="15" fill="#86efac">CPU:  [███░░░░░░░░░░░░░░░░░] 12.5%</text>
-  <text x="82" y="424" font-family="Consolas, Menlo, monospace" font-size="15" fill="#86efac">MEM:  [██████░░░░░░░░░░░░░░] 31.2% (488MiB / 1.5GiB)</text>
-  <text x="82" y="456" font-family="Consolas, Menlo, monospace" font-size="15" fill="#86efac">NET:  12.8MB / 3.1MB</text>
-  <line x1="52" y1="480" x2="928" y2="480" stroke="#3f4654"/>
-  <text x="62" y="512" font-family="Consolas, Menlo, monospace" font-size="14" fill="#67e8f9">[S] Start/Stop | [L] Logs | [I] Inspect | [E] Exec | [N] Rename | [P] Disk/Prune | [Q] Quit</text>
+  <text x="550" y="48" text-anchor="middle" font-family="Consolas, Menlo, monospace" font-size="15" fill="#cfd6e6">docktui --refresh-interval 2 --docker-timeout 10</text>
+
+  <text x="550" y="96" text-anchor="middle" font-family="Consolas, Menlo, monospace" font-size="23" font-weight="700" fill="#67e8f9">DockTUI Docker Dashboard</text>
+
+  <rect x="50" y="120" width="150" height="30" rx="4" fill="#2563eb"/>
+  <text x="68" y="140" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">Containers (1)</text>
+  <rect x="214" y="120" width="128" height="30" rx="4" fill="#1d4ed8"/>
+  <text x="232" y="140" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">Compose (2)</text>
+  <text x="362" y="140" font-family="Consolas, Menlo, monospace" font-size="14" fill="#aab4c4">[Images (3)]</text>
+  <text x="482" y="140" font-family="Consolas, Menlo, monospace" font-size="14" fill="#aab4c4">[Volumes (4)]</text>
+  <text x="610" y="140" font-family="Consolas, Menlo, monospace" font-size="14" fill="#aab4c4">[Networks (5)]</text>
+  <text x="760" y="140" font-family="Consolas, Menlo, monospace" font-size="14" fill="#facc15">[filter: app | sort: state]</text>
+
+  <line x1="50" y1="166" x2="1050" y2="166" stroke="#3f4654"/>
+
+  <text x="62" y="196" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">PROJECT / SERVICE</text>
+  <text x="286" y="196" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">CONTAINER</text>
+  <text x="494" y="196" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">STATE</text>
+  <text x="604" y="196" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#f2f5f9">IMAGE</text>
+
+  <rect x="50" y="214" width="620" height="34" rx="4" fill="#242936"/>
+  <text x="62" y="236" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#67e8f9">myshop  (4)</text>
+  <rect x="50" y="254" width="620" height="34" rx="4" fill="#1d4ed8"/>
+  <text x="62" y="276" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">» api</text>
+  <text x="286" y="276" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">myshop-api-1</text>
+  <text x="494" y="276" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">running</text>
+  <text x="604" y="276" font-family="Consolas, Menlo, monospace" font-size="14" fill="#ffffff">myshop/api:dev</text>
+  <text x="62" y="316" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">  db</text>
+  <text x="286" y="316" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">myshop-db-1</text>
+  <text x="494" y="316" font-family="Consolas, Menlo, monospace" font-size="14" fill="#86efac">running</text>
+  <text x="604" y="316" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">postgres:15</text>
+  <text x="62" y="356" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">  redis</text>
+  <text x="286" y="356" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">myshop-redis-1</text>
+  <text x="494" y="356" font-family="Consolas, Menlo, monospace" font-size="14" fill="#f87171">exited</text>
+  <text x="604" y="356" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">redis:7</text>
+  <rect x="50" y="376" width="620" height="34" rx="4" fill="#242936"/>
+  <text x="62" y="398" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#67e8f9">(standalone)  (1)</text>
+  <text x="62" y="438" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">  worker</text>
+  <text x="286" y="438" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">backup-worker</text>
+  <text x="494" y="438" font-family="Consolas, Menlo, monospace" font-size="14" fill="#86efac">running</text>
+  <text x="604" y="438" font-family="Consolas, Menlo, monospace" font-size="14" fill="#cbd5e1">python:3.12</text>
+
+  <line x1="50" y1="466" x2="670" y2="466" stroke="#3f4654"/>
+  <text x="62" y="500" font-family="Consolas, Menlo, monospace" font-size="15" font-weight="700" fill="#67e8f9">CONTAINER RESOURCE USAGE</text>
+  <text x="82" y="532" font-family="Consolas, Menlo, monospace" font-size="14" fill="#86efac">CPU: [████░░░░░░░░░░░░] 22.4%</text>
+  <text x="82" y="558" font-family="Consolas, Menlo, monospace" font-size="14" fill="#86efac">MEM: [██████░░░░░░░░░░] 36.8% (612MiB / 1.6GiB)</text>
+  <text x="82" y="584" font-family="Consolas, Menlo, monospace" font-size="14" fill="#86efac">NET: 18.2MB / 4.7MB</text>
+
+  <rect x="700" y="178" width="330" height="146" rx="6" fill="#111827" stroke="#374151"/>
+  <text x="718" y="206" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#67e8f9">DETAILS VIEW (V)</text>
+  <text x="718" y="232" font-family="Consolas, Menlo, monospace" font-size="13" fill="#cbd5e1">Ports: 0.0.0.0:8080 -> 8000/tcp</text>
+  <text x="718" y="256" font-family="Consolas, Menlo, monospace" font-size="13" fill="#cbd5e1">Mounts: ./app -> /app (rw)</text>
+  <text x="718" y="280" font-family="Consolas, Menlo, monospace" font-size="13" fill="#cbd5e1">Networks: myshop_default</text>
+  <text x="718" y="304" font-family="Consolas, Menlo, monospace" font-size="13" fill="#cbd5e1">Restart: unless-stopped</text>
+
+  <rect x="700" y="342" width="330" height="122" rx="6" fill="#111827" stroke="#374151"/>
+  <text x="718" y="370" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#67e8f9">LOGS VIEW</text>
+  <text x="718" y="394" font-family="Consolas, Menlo, monospace" font-size="13" fill="#facc15">[FOLLOW] [SEARCH: error] [ERRORS]</text>
+  <text x="718" y="418" font-family="Consolas, Menlo, monospace" font-size="13" fill="#cbd5e1">2026-06-04T12:14 api started</text>
+  <text x="718" y="442" font-family="Consolas, Menlo, monospace" font-size="13" fill="#f87171">2026-06-04T12:15 error retrying db</text>
+
+  <rect x="700" y="482" width="330" height="76" rx="6" fill="#111827" stroke="#374151"/>
+  <text x="718" y="510" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="700" fill="#67e8f9">EXEC PRESETS</text>
+  <text x="718" y="536" font-family="Consolas, Menlo, monospace" font-size="13" fill="#cbd5e1">1 sh  2 bash  3 env  4 ls -la  5 os-release</text>
+
+  <line x1="50" y1="602" x2="1050" y2="602" stroke="#3f4654"/>
+  <text x="62" y="626" font-family="Consolas, Menlo, monospace" font-size="13" fill="#67e8f9">[S] Start/Stop group | [R] Restart | [L] Logs | [V] Details | [E] Exec | [O] Sort | [Y] State | [P] Prune | [?] Help</text>
 </svg>
