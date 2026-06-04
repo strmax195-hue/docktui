@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a workflow or improvement for DockTUI.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What Docker workflow is currently repetitive, slow, or hard?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should DockTUI do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Are there commands or tools you use today?
+    validations:
+      required: false
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This can work without adding runtime dependencies.
+          required: false
+        - label: This fits local Docker container/image workflows.
+          required: false

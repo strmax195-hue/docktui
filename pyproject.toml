@@ -11,21 +11,42 @@ authors = [
     { name = "DockTUI Maintainers" }
 ]
 license = { text = "MIT" }
+keywords = ["docker", "tui", "terminal", "containers", "monitoring", "devops"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
-    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Topic :: System :: Systems Administration",
     "Topic :: Software Development :: Build Tools",
     "Topic :: System :: Monitoring"
 ]
 requires-python = ">=3.7"
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+    "build>=1.2.0",
+    "twine>=5.0.0"
+]
+
 [project.urls]
 Homepage = "https://github.com/strmax195-hue/docktui"
 Bug-Tracker = "https://github.com/strmax195-hue/docktui/issues"
+Changelog = "https://github.com/strmax195-hue/docktui/blob/main/CHANGELOG.md"
+Roadmap = "https://github.com/strmax195-hue/docktui/blob/main/ROADMAP.md"
+Source = "https://github.com/strmax195-hue/docktui"
 
 [project.scripts]
 docktui = "docktui.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["docktui*"]

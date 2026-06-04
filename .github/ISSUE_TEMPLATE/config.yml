@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Roadmap
+    url: https://github.com/strmax195-hue/docktui/blob/main/ROADMAP.md
+    about: Check planned improvements before opening a feature request.
