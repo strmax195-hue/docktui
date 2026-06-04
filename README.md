@@ -3,7 +3,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.7%2B-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml/badge.svg)](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml)
-[![PyPI Ready](https://img.shields.io/badge/PyPI-ready-blue)](docs/publishing.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
 **DockTUI** is a fast, zero-dependency terminal dashboard for monitoring, debugging, and managing local Docker containers and images. It is written in pure Python, talks to Docker through the Docker CLI, and keeps your existing Docker permissions and context intact.
@@ -25,23 +24,14 @@ Use DockTUI when you want something richer than repeated `docker ps`, `docker st
 
 ## Key Features
 
-- **Zero Dependencies**: Pure Python standard library implementation, no installation of heavy third-party UI/TUI frameworks required.
-- **Multi-Tab Navigation**:
-  - **Containers Tab**: Real-time listing of active and inactive containers.
-  - **Compose Tab**: Groups containers by Compose project and service labels.
-  - **Images Tab**: Clean grid layout showing local Docker images and their size.
-  - **Volumes Tab**: Browse and delete local Docker volumes.
-  - **Networks Tab**: Browse local Docker networks.
-- **Container Grid Search & Filtering**: Press `/` in the main view to instantly filter containers by name or image. Press `C` to clear the filter.
-- **Sorting & State Filters**: Cycle sort modes with `O` and state filters with `Y`.
-- **Interactive Container Execution**: Execute preset, recent, or custom commands inside running containers (`E` key) and scroll through the command outputs in a scrollable console viewer.
-- **Quick Rename**: Rename containers instantly (`N` key) with automatic dashboard refresh.
-- **Readable Details View**: Open a structured container summary (`V` key) for ports, mounts, env, labels, networks, and restart policy.
-- **Scrollable Log View**: View and search container logs with an interactive viewport. Supports follow mode, next-match navigation, error-only filtering, search, and tail limit adjustment.
-- **Interactive Configuration Inspect**: Browse detailed container JSON configuration (`I` key) inside a scrollable inspector viewport.
-- **System Disk Usage & Pruning**: Review overall disk space consumed by images, containers, and volumes (`P` key), then trigger explicit cleanup actions with real-time feedback.
-- **Modern Aesthetics**: Utilizes Unicode double-line frames, block character resource usage bars (`█`/`░`), and ANSI color coding.
-- **Dynamic Layout & Resizing**: Automatically listens to terminal dimensions (`os.get_terminal_size()`) and scales column grids proportionally.
+| Area | What DockTUI gives you |
+| --- | --- |
+| **Docker dashboard** | Containers, Compose groups, images, volumes, and networks in one terminal UI. |
+| **Daily actions** | Start, stop, restart, rename, inspect, delete images/volumes, and run safe prune flows. |
+| **Logs** | Follow mode, search, next-match navigation, error/warning-only filtering, and adjustable tail size. |
+| **Exec** | Preset, recent, and custom commands inside running containers. |
+| **Details** | Readable container summary for ports, mounts, env, labels, networks, and restart policy. |
+| **Zero dependencies** | Pure Python standard library implementation; no Docker SDK or TUI framework required. |
 
 ---
 
@@ -56,7 +46,13 @@ Use DockTUI when you want something richer than repeated `docker ps`, `docker st
 
 ## Installation
 
-Clone the repository and install it locally using `pip`:
+Current install from GitHub:
+
+```bash
+pip install git+https://github.com/strmax195-hue/docktui.git
+```
+
+For local development:
 
 ```bash
 git clone https://github.com/strmax195-hue/docktui.git
@@ -64,11 +60,7 @@ cd docktui
 pip install -e .
 ```
 
-After the first PyPI release, installation will be:
-
-```bash
-pip install docktui
-```
+PyPI publishing is prepared in [docs/publishing.md](docs/publishing.md). After the first release, installation will become `pip install docktui`.
 
 ---
 
