@@ -153,3 +153,35 @@ class DockerClient:
             return res.stdout or res.stderr or "No inspect data."
         except Exception as e:
             return f"Error inspecting container: {str(e)}"
+
+    def get_disk_usage(self) -> str:
+        """Runs 'docker system df' to get disk space statistics."""
+        if not self.is_docker_installed():
+            return "Docker not installed."
+        try:
+            res = subprocess.run(
+                [self.docker_bin, "system", "df"],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            return res.stdout or res.stderr or "No disk usage data."
+        except Exception as e:
+            return f"Error reading disk usage: {str(e)}"
+
+    def prune_system(self) -> str:
+        """Runs 'docker system prune -f' to clean unused resources."""
+        if not self.is_docker_installed():
+            return "Docker not installed."
+        try:
+            res = subprocess.run(
+                [self.docker_bin, "system", "prune", "-f"],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            return res.stdout or res.stderr or "Prune completed with no output."
+        except Exception as e:
+            return f"Error running prune command: {str(e)}"

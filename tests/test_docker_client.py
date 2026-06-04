@@ -76,5 +76,23 @@ class TestDockerClient(unittest.TestCase):
         inspect_data = self.client.inspect_container("c123")
         self.assertEqual(inspect_data, mock_stdout)
 
+    @patch("subprocess.run")
+    def test_get_disk_usage(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_stdout = "TYPE            TOTAL           ACTIVE          SIZE            RECLAIMABLE\nImages          10              2               1.5GB           1.2GB (80%)"
+        mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
+        
+        disk_usage = self.client.get_disk_usage()
+        self.assertEqual(disk_usage, mock_stdout)
+
+    @patch("subprocess.run")
+    def test_prune_system(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_stdout = "Total reclaimed space: 500MB"
+        mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
+        
+        prune_res = self.client.prune_system()
+        self.assertEqual(prune_res, mock_stdout)
+
 if __name__ == "__main__":
     unittest.main()

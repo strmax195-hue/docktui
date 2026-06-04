@@ -71,13 +71,15 @@ class ContainerDashboard:
         self.containers: List[Dict[str, str]] = []
         self.stats: Dict[str, Dict[str, str]] = {}
         self.selected_index = 0
-        self.view_mode = "main"  # 'main', 'logs', or 'inspect'
+        self.view_mode = "main"  # 'main', 'logs', 'inspect', or 'system'
         self.status_message = "Welcome to DockTUI! Use arrow keys to navigate."
         self.status_time = time.time()
         self.last_refresh = 0.0
         self.log_filter = ""
         self.inspect_lines: List[str] = []
         self.inspect_scroll_index = 0
+        self.log_tail_limit = 40
+        self.system_info_text = ""
 
     def set_status(self, msg: str):
         self.status_message = msg
@@ -122,13 +124,23 @@ class ContainerDashboard:
 
     def draw_main_view(self):
         """Renders the main table dashboard view."""
+        # Query screen size dynamically
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+        except Exception:
+            width = 80
+
         # Clear screen
         print("\033[2J\033[H", end="")
 
         # Title block
-        print(f"{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
-        print(f"{CYAN}{BOLD}║                     DockTUI Container Dashboard              ║{RESET}")
-        print(f"{CYAN}{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
+        title_text = "DockTUI Container Dashboard"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
         
         # Check if Docker is available
         if not self.client.is_docker_installed():
@@ -149,9 +161,21 @@ class ContainerDashboard:
             print("\nPress 'q' to quit. Auto-refreshing...")
             return
 
+        # Calculate column widths dynamically based on terminal width
+        rem = width - 26
+        name_w = max(15, int(rem * 0.30))
+        image_w = max(15, int(rem * 0.30))
+        status_w = max(15, rem - name_w - image_w)
+
+        def truncate(text: str, length: int) -> str:
+            if len(text) > length:
+                return text[:length-3] + "..."
+            return text.ljust(length)
+
         # Table headers
-        print(f"{BOLD}{'ID':<12} {'NAME':<20} {'IMAGE':<18} {'STATE':<10} {'STATUS':<15}{RESET}")
-        print("─" * 78)
+        header_line = f"{BOLD}{'ID':<12} {truncate('NAME', name_w)} {truncate('IMAGE', image_w)} {'STATE':<10} {truncate('STATUS', status_w)}{RESET}"
+        print(header_line)
+        print("─" * (width - 1))
 
         # Render list of containers
         for idx, c in enumerate(self.containers):
@@ -170,14 +194,14 @@ class ContainerDashboard:
             if idx == self.selected_index:
                 # Remove formatting on selected row to keep background color consistent
                 state_formatted = state
-                name_str = f"» {c['name'][:18]}"
+                name_str = f"» {c['name']}"
             else:
-                name_str = f"  {c['name'][:18]}"
+                name_str = f"  {c['name']}"
 
-            line = f"{style}{c['id'][:10]:<12} {name_str:<20} {c['image'][:18]:<18} {state_formatted:<10} {c['status'][:15]:<15}{RESET}"
+            line = f"{style}{c['id'][:10]:<12} {truncate(name_str, name_w)} {truncate(c['image'], image_w)} {state_formatted:<10} {truncate(c['status'], status_w)}{RESET}"
             print(line)
 
-        print("─" * 78)
+        print("─" * (width - 1))
 
         # Render Stats section for selected container
         if self.containers:
@@ -187,8 +211,8 @@ class ContainerDashboard:
             
             c_stats = self.stats.get(c_id) or self.stats.get(sel["name"])
             if c_stats and sel["state"] == "running":
-                cpu_bar = self.get_percentage_bar(c_stats['cpu'])
-                mem_bar = self.get_percentage_bar(c_stats['mem_perc'])
+                cpu_bar = self.get_percentage_bar(c_stats['cpu'], width=int(width*0.2))
+                mem_bar = self.get_percentage_bar(c_stats['mem_perc'], width=int(width*0.2))
                 print(f"  CPU:  {GREEN}{cpu_bar}{RESET}")
                 print(f"  MEM:  {GREEN}{mem_bar} ({c_stats['memory']}){RESET}")
                 print(f"  NET:  {GREEN}{c_stats['net']}{RESET}")
@@ -197,15 +221,15 @@ class ContainerDashboard:
                 print(f"  Usage statistics: {YELLOW}{status_text}{RESET}")
 
         # Render status line at bottom
-        print("\n" + "═" * 78)
+        print("\n" + "═" * (width - 1))
         # Clear status message if old
         if time.time() - self.status_time > 4:
             self.status_message = "Use Arrow keys to select. Auto-refreshing every 2s."
         print(f"{BOLD}Status:{RESET} {self.status_message}")
-        print("═" * 78)
+        print("═" * (width - 1))
         
         # Action instructions
-        print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [G] Refresh | [Q] Quit{RESET}")
+        print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [P] Disk/Prune | [G] Refresh | [Q] Quit{RESET}")
 
     def draw_logs_view(self):
         """Renders the fullscreen log viewer screen."""
@@ -213,15 +237,29 @@ class ContainerDashboard:
             self.view_mode = "main"
             return
 
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+            height = max(24, terminal_size.lines)
+        except Exception:
+            width = 80
+            height = 24
+
         sel = self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
-        print(f"{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
-        filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
-        title_text = f"LOGS: {sel['name']}{filter_status}"
-        print(f"{CYAN}{BOLD}║ {title_text:<58} ║{RESET}")
-        print(f"{CYAN}{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
         
-        raw_logs = self.client.get_logs(sel["id"], tail=150)
+        filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
+        limit_status = f" [LIMIT: {self.log_tail_limit} lines]"
+        title_text = f"LOGS: {sel['name']}{filter_status}{limit_status}"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+        
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
+        
+        # Pull enough logs to satisfy our limit + filtering
+        raw_logs = self.client.get_logs(sel["id"], tail=self.log_tail_limit + 100)
         log_lines = raw_logs.strip().split("\n")
         
         # Filter lines if keyword is active
@@ -229,13 +267,16 @@ class ContainerDashboard:
             filtered_lines = [line for line in log_lines if self.log_filter.lower() in line.lower()]
             if not filtered_lines:
                 filtered_lines = [f"{YELLOW}(No logs match filter '{self.log_filter}'){RESET}"]
-            display_logs = "\n".join(filtered_lines[-30:])
+            # Show up to viewport height - 6 lines
+            viewport_lines = filtered_lines[-(height - 6):]
         else:
-            display_logs = "\n".join(log_lines[-30:])
+            viewport_lines = log_lines[-(height - 6):]
 
+        display_logs = "\n".join(line[:width-1] for line in viewport_lines)
         print(display_logs)
-        print("\n" + "═" * 78)
-        print(f"{CYAN}[/] Filter logs | [C] Clear filter | [G] Refresh | [Any other key] Back to dashboard{RESET}")
+        
+        print("\n" + "═" * (width - 1))
+        print(f"{CYAN}[/] Filter | [C] Clear Filter | [+/-] Limit logs | [G] Refresh | [Esc/Other] Back{RESET}")
 
     def draw_inspect_view(self):
         """Renders the scrollable inspect JSON screen."""
@@ -243,22 +284,59 @@ class ContainerDashboard:
             self.view_mode = "main"
             return
 
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+            height = max(24, terminal_size.lines)
+        except Exception:
+            width = 80
+            height = 24
+
         sel = self.containers[self.selected_index]
         print("\033[2J\033[H", end="")
-        print(f"{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
+        
         title_text = f"INSPECT: {sel['name']} (Line {self.inspect_scroll_index + 1} of {len(self.inspect_lines)})"
-        print(f"{CYAN}{BOLD}║ {title_text:<58} ║{RESET}")
-        print(f"{CYAN}{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+        
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
 
-        # Viewport size (e.g. 24 lines)
-        viewport_height = 24
+        # Viewport size (lines available for content)
+        viewport_height = height - 6
         end_idx = min(len(self.inspect_lines), self.inspect_scroll_index + viewport_height)
         
         for i in range(self.inspect_scroll_index, end_idx):
-            print(self.inspect_lines[i][:78]) # Trim line width to match box width
+            print(self.inspect_lines[i][:width-1]) # Trim line width to match viewport width
             
-        print("\n" + "═" * 78)
+        print("\n" + "═" * (width - 1))
         print(f"{CYAN}[↑/↓] Scroll | [Esc] or [I] Return to dashboard{RESET}")
+
+    def draw_system_view(self):
+        """Renders the Docker system disk usage and prune view."""
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+        except Exception:
+            width = 80
+
+        print("\033[2J\033[H", end="")
+        
+        title_text = "DOCKER SYSTEM DISK USAGE & CLEANUP"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+        
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
+
+        if not self.system_info_text:
+            self.system_info_text = self.client.get_disk_usage()
+
+        print(self.system_info_text)
+        print("\n" + "═" * (width - 1))
+        print(f"{CYAN}[X] Run Prune (clean unused containers/images) | [Esc/P] Return to dashboard{RESET}")
 
     def run(self):
         """The main dashboard control loop."""
@@ -267,6 +345,12 @@ class ContainerDashboard:
         
         running = True
         while running:
+            # Query terminal height
+            try:
+                viewport_h = max(24, os.get_terminal_size().lines) - 6
+            except Exception:
+                viewport_h = 18
+
             # Render corresponding view
             if self.view_mode == "main":
                 self.draw_main_view()
@@ -274,6 +358,8 @@ class ContainerDashboard:
                 self.draw_logs_view()
             elif self.view_mode == "inspect":
                 self.draw_inspect_view()
+            elif self.view_mode == "system":
+                self.draw_system_view()
 
             # Auto-refresh main dashboard every 2 seconds
             if self.view_mode == "main" and (time.time() - self.last_refresh > 2.0):
@@ -284,7 +370,7 @@ class ContainerDashboard:
             if key:
                 if self.view_mode == "logs":
                     if key == "g":
-                        # Refresh logs
+                        # Refresh logs is handled by loop redrawing
                         pass
                     elif key == "/":
                         query = self.prompt_user("Enter search term: ")
@@ -292,7 +378,13 @@ class ContainerDashboard:
                     elif key == "c":
                         self.log_filter = ""
                         self.set_status("Cleared log filter.")
-                    else:
+                    elif key in ("+", "="):
+                        self.log_tail_limit = min(500, self.log_tail_limit + 10)
+                        self.set_status(f"Increased log limit to {self.log_tail_limit} lines.")
+                    elif key == "-":
+                        self.log_tail_limit = max(10, self.log_tail_limit - 10)
+                        self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
+                    elif key in ("q", "l", "\x1b"):
                         self.view_mode = "main"
                 elif self.view_mode == "inspect":
                     if key == "up":
@@ -300,9 +392,23 @@ class ContainerDashboard:
                             self.inspect_scroll_index -= 1
                     elif key == "down":
                         # Allow scrolling if there are more lines than the viewport
-                        if self.inspect_scroll_index < len(self.inspect_lines) - 24:
+                        if self.inspect_scroll_index < len(self.inspect_lines) - viewport_h:
                             self.inspect_scroll_index += 1
                     elif key in ("i", "\x1b"):  # 'i' or 'Esc'
+                        self.view_mode = "main"
+                elif self.view_mode == "system":
+                    if key == "x":
+                        self.set_status("Running docker system prune -f...")
+                        self.draw_system_view()
+                        prune_out = self.client.prune_system()
+                        # Output results
+                        print("\n" + "─" * 40)
+                        print(prune_out)
+                        print("─" * 40)
+                        self.prompt_user("Prune complete. Press ENTER to continue.")
+                        self.system_info_text = ""  # Force refresh df
+                        self.refresh_data()
+                    elif key in ("p", "\x1b"):
                         self.view_mode = "main"
                 else:
                     # Dashboard controls (main view)
@@ -321,6 +427,9 @@ class ContainerDashboard:
                         if self.containers:
                             self.log_filter = ""  # Reset log filter on enter
                             self.view_mode = "logs"
+                    elif key == "p":
+                        self.system_info_text = ""  # Reset system stats on enter
+                        self.view_mode = "system"
                     elif key == "i":
                         if self.containers:
                             sel = self.containers[self.selected_index]
