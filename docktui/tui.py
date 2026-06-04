@@ -173,6 +173,7 @@ class ContainerDashboard:
         self.input_buffer = ""
         self.input_callback: Optional[Callable[[str], None]] = None
         self.input_cancel_callback: Optional[Callable[[], None]] = None
+        self.need_redraw = True
 
     def export_logs_to_file(self, filepath: str):
         self._export_lines_to_file(self.log_lines, "Logs", filepath)
@@ -251,6 +252,7 @@ class ContainerDashboard:
     def set_status(self, msg: str):
         self.status_message = msg
         self.status_time = time.time()
+        self.need_redraw = True
 
     def request_refresh(self):
         self.refresh_requested.set()
@@ -289,6 +291,7 @@ class ContainerDashboard:
         self.input_buffer = initial
         self.input_callback = callback
         self.input_cancel_callback = cancel_callback
+        self.need_redraw = True
 
     def cancel_input(self):
         if self.input_cancel_callback:
@@ -298,6 +301,7 @@ class ContainerDashboard:
         self.input_callback = None
         self.input_cancel_callback = None
         self.view_mode = self.previous_view_mode or "main"
+        self.need_redraw = True
 
     def submit_input(self):
         value = self.input_buffer.strip()
@@ -307,6 +311,7 @@ class ContainerDashboard:
         self.input_callback = None
         self.input_cancel_callback = None
         self.view_mode = self.previous_view_mode or "main"
+        self.need_redraw = True
         if callback:
             callback(value)
 
@@ -333,10 +338,12 @@ class ContainerDashboard:
         if self.view_mode != "help":
             self.previous_view_mode = self.view_mode
         self.view_mode = "help"
+        self.need_redraw = True
 
     def close_help(self):
         """Returns from help to the screen that opened it."""
         self.view_mode = self.previous_view_mode or "main"
+        self.need_redraw = True
 
     def prompt_user(self, prompt_text: str) -> str:
         """Prompts the user for text input in a clean way."""
@@ -608,6 +615,7 @@ class ContainerDashboard:
         with self.data_lock:
             self.last_refresh = time.time()
             self.refresh_in_progress = False
+            self.need_redraw = True
 
     def draw_main_view(self):
         """Renders the main table dashboard view."""
@@ -1149,36 +1157,46 @@ class ContainerDashboard:
                 except Exception:
                     viewport_h = 18
 
-                # Render corresponding view
-                if self.view_mode == "main":
-                    self.draw_main_view()
-                elif self.view_mode == "logs":
-                    self.draw_logs_view()
-                elif self.view_mode == "inspect":
-                    self.draw_inspect_view()
-                elif self.view_mode == "details":
-                    self.draw_details_view()
-                elif self.view_mode == "top":
-                    self.draw_top_view()
-                elif self.view_mode == "system":
-                    self.draw_system_view()
-                elif self.view_mode == "exec":
-                    self.draw_exec_view()
-                elif self.view_mode == "input":
-                    self.draw_input_view()
-                elif self.view_mode == "help":
-                    self.draw_help_view()
+                # Render corresponding view if needed
+                if self.need_redraw:
+                    self.need_redraw = False
+                    if self.view_mode == "main":
+                        self.draw_main_view()
+                    elif self.view_mode == "logs":
+                        self.draw_logs_view()
+                    elif self.view_mode == "inspect":
+                        self.draw_inspect_view()
+                    elif self.view_mode == "details":
+                        self.draw_details_view()
+                    elif self.view_mode == "top":
+                        self.draw_top_view()
+                    elif self.view_mode == "system":
+                        self.draw_system_view()
+                    elif self.view_mode == "exec":
+                        self.draw_exec_view()
+                    elif self.view_mode == "input":
+                        self.draw_input_view()
+                    elif self.view_mode == "help":
+                        self.draw_help_view()
 
                 # Auto-refresh main dashboard every 2 seconds
                 if self.view_mode == "main" and (time.time() - self.last_refresh > self.refresh_interval):
                     self.request_refresh()
+                # Auto-refresh logs in follow mode every 2 seconds
+                if self.view_mode == "logs" and self.log_follow and (time.time() - self.last_log_refresh > self.refresh_interval):
+                    self.need_redraw = True
                 if RESIZE_REQUESTED:
                     RESIZE_REQUESTED = False
                     self.request_refresh()
+                    self.need_redraw = True
+                if self.status_message != "Use Tab to switch tabs. Up/Down to navigate." and (time.time() - self.status_time > 4):
+                    self.status_message = "Use Tab to switch tabs. Up/Down to navigate."
+                    self.need_redraw = True
 
                 # Check for keyboard input
                 key = get_key_nonblocking()
                 if key:
+                    self.need_redraw = True
                     if self.view_mode == "input":
                         self.handle_input_key(key)
                         time.sleep(0.08)
