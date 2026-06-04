@@ -140,5 +140,25 @@ class TestDockerClient(unittest.TestCase):
         self.assertIn("bin", output)
         self.assertIn("boot", output)
 
+    @patch("subprocess.run")
+    def test_exec_command_preserves_quoted_arguments(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="hello world\n")
+
+        output = self.client.exec_command("c123", 'sh -c "echo hello world"')
+
+        self.assertIn("hello world", output)
+        self.assertEqual(
+            mock_run.call_args.args[0],
+            ["docker", "exec", "c123", "sh", "-c", "echo hello world"]
+        )
+
+    def test_exec_command_rejects_invalid_quoting(self):
+        self.client.docker_bin = "docker"
+
+        output = self.client.exec_command("c123", 'sh -c "echo')
+
+        self.assertIn("Invalid command", output)
+
 if __name__ == "__main__":
     unittest.main()

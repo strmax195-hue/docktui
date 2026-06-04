@@ -1,5 +1,6 @@
 import subprocess
 import shutil
+import shlex
 from typing import Dict, List, Optional, Tuple
 
 class DockerClient:
@@ -259,7 +260,10 @@ class DockerClient:
         """Executes a single command inside a running container."""
         if not self.is_docker_installed():
             return "Docker not installed."
-        cmd_parts = command.split()
+        try:
+            cmd_parts = shlex.split(command)
+        except ValueError as e:
+            return f"Invalid command: {str(e)}"
         if not cmd_parts:
             return "Empty command."
         

@@ -24,8 +24,8 @@ requires-python = ">=3.7"
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/yourusername/docktui"
-Bug-Tracker = "https://github.com/yourusername/docktui/issues"
+Homepage = "https://github.com/strmax195-hue/docktui"
+Bug-Tracker = "https://github.com/strmax195-hue/docktui/issues"
 
 [project.scripts]
 docktui = "docktui.cli:main"

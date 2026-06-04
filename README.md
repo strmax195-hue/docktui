@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.7%2B-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml/badge.svg)](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
 **DockTUI** is a lightweight, zero-dependency, interactive Terminal User Interface (TUI) dashboard to monitor, debug, and manage local Docker containers and images. Written in pure Python with **zero external dependencies**, it works out of the box on Windows, macOS, and Linux.
@@ -80,7 +81,7 @@ docktui
   - `R`: Re-run the current command.
   - `E`: Execute a new command.
 - **System View Features**:
-  - `X`: Trigger `docker system prune -f` to clean unused containers, networks, and images.
+  - `X`: Trigger `docker system prune -f` after typing `PRUNE` to confirm cleanup of unused containers, networks, and images.
 
 ---
 
@@ -99,8 +100,10 @@ It implements a non-blocking cross-platform input capturing loop using:
 DockTUI includes an isolated unit test suite covering client operations via subprocess mocking, meaning you can run tests without a running Docker daemon:
 
 ```bash
-py -m unittest discover tests
+python -m unittest discover tests
 ```
+
+On Windows, `py -m unittest discover tests` also works when the Python launcher is installed.
 
 ---
 

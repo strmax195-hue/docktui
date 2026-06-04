@@ -89,10 +89,21 @@ class ContainerDashboard:
         self.exec_scroll_index = 0
         self.exec_command_text = ""
         self.system_info_text = ""
+        self.daemon_running = False
+        self.last_daemon_check = 0.0
+        self.daemon_check_interval = 3.0
 
     def set_status(self, msg: str):
         self.status_message = msg
         self.status_time = time.time()
+
+    def is_daemon_running_cached(self, force: bool = False) -> bool:
+        """Caches Docker daemon checks so the render loop stays responsive."""
+        now = time.time()
+        if force or now - self.last_daemon_check >= self.daemon_check_interval:
+            self.daemon_running = self.client.is_daemon_running()
+            self.last_daemon_check = now
+        return self.daemon_running
 
     def prompt_user(self, prompt_text: str) -> str:
         """Prompts the user for text input in a clean way."""
@@ -171,7 +182,7 @@ class ContainerDashboard:
             print("\nPress 'q' to quit.")
             return
 
-        if not self.client.is_daemon_running():
+        if not self.is_daemon_running_cached():
             print(f"\n{YELLOW}{BOLD}Warning: Cannot connect to the Docker daemon.{RESET}")
             print("Please make sure Docker Desktop or the docker service is running.")
             print("\nPress 'q' to quit, or 'r' to retry connection.")
@@ -517,6 +528,10 @@ class ContainerDashboard:
                         self.view_mode = "main"
                 elif self.view_mode == "system":
                     if key == "x":
+                        confirm = self.prompt_user("Type PRUNE to clean unused Docker resources: ")
+                        if confirm != "PRUNE":
+                            self.set_status("Prune canceled.")
+                            continue
                         self.set_status("Running docker system prune -f...")
                         self.draw_system_view()
                         prune_out = self.client.prune_system()
@@ -645,8 +660,11 @@ class ContainerDashboard:
                                 self.refresh_data()
                     elif key == "r" and self.current_tab == "containers":
                         # Attempt to reconnect daemon or restart container
-                        if not self.client.is_daemon_running():
+                        if not self.is_daemon_running_cached(force=True):
                             self.set_status("Reconnecting to Docker daemon...")
+                            self.refresh_data()
+                        elif not self.containers:
+                            self.set_status("Connected to Docker daemon. Refreshing data...")
                             self.refresh_data()
                         elif self.containers:
                             sel = self.containers[self.selected_index]
