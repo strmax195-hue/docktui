@@ -66,15 +66,17 @@ except ImportError:
 class ContainerDashboard:
     """The main TUI rendering and interaction loop."""
 
-    def __init__(self):
-        self.client = DockerClient()
+    def __init__(self, refresh_interval: float = 2.0, docker_timeout: float = 10.0):
+        self.client = DockerClient(timeout=docker_timeout)
+        self.refresh_interval = refresh_interval
         self.containers: List[Dict[str, str]] = []
         self.stats: Dict[str, Dict[str, str]] = {}
         self.images: List[Dict[str, str]] = []
         self.selected_index = 0
         self.selected_image_index = 0
         self.current_tab = "containers"  # "containers" or "images"
-        self.view_mode = "main"  # 'main', 'logs', 'inspect', 'system', or 'exec'
+        self.view_mode = "main"  # 'main', 'logs', 'inspect', 'system', 'exec', or 'help'
+        self.previous_view_mode = "main"
         self.status_message = "Welcome to DockTUI! Use Tab or 1/2 keys to switch tabs."
         self.status_time = time.time()
         self.last_refresh = 0.0
@@ -85,6 +87,8 @@ class ContainerDashboard:
         self.log_tail_limit = 40
         self.log_lines: List[str] = []
         self.log_scroll_index = 0
+        self.log_follow = False
+        self.last_log_refresh = 0.0
         self.exec_output_lines: List[str] = []
         self.exec_scroll_index = 0
         self.exec_command_text = ""
@@ -104,6 +108,16 @@ class ContainerDashboard:
             self.daemon_running = self.client.is_daemon_running()
             self.last_daemon_check = now
         return self.daemon_running
+
+    def open_help(self):
+        """Opens help and remembers the current screen."""
+        if self.view_mode != "help":
+            self.previous_view_mode = self.view_mode
+        self.view_mode = "help"
+
+    def close_help(self):
+        """Returns from help to the screen that opened it."""
+        self.view_mode = self.previous_view_mode or "main"
 
     def prompt_user(self, prompt_text: str) -> str:
         """Prompts the user for text input in a clean way."""
@@ -128,6 +142,20 @@ class ContainerDashboard:
         except Exception:
             # Fallback if loading or N/A
             return f"[░░░░░░░░░░░░░░░] {percentage_str}"
+
+    def load_log_lines(self, container_id: str, viewport_height: int, follow: bool = False):
+        """Loads logs and keeps the viewport pinned to the bottom in follow mode."""
+        raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit)
+        log_lines = raw_logs.split("\n")
+        if self.log_filter:
+            self.log_lines = [line for line in log_lines if self.log_filter.lower() in line.lower()]
+            if not self.log_lines:
+                self.log_lines = [f"{YELLOW}(No logs match filter '{self.log_filter}'){RESET}"]
+        else:
+            self.log_lines = log_lines
+        if follow or self.log_scroll_index >= max(0, len(self.log_lines) - viewport_height - 1):
+            self.log_scroll_index = max(0, len(self.log_lines) - viewport_height)
+        self.last_log_refresh = time.time()
 
     def refresh_data(self):
         """Fetches fresh docker data based on active tab."""
@@ -302,9 +330,9 @@ class ContainerDashboard:
         
         # Action instructions depending on the active tab
         if self.current_tab == "containers":
-            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [E] Exec | [N] Rename | [/] Filter | [P] Disk/Prune | [Q] Quit{RESET}")
+            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [I] Inspect | [E] Exec | [N] Rename | [/] Filter | [?] Help | [Q] Quit{RESET}")
         else:
-            print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch Tab | [G] Refresh | [Q] Quit{RESET}")
+            print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch Tab | [G] Refresh | [?] Help | [Q] Quit{RESET}")
 
     def draw_logs_view(self):
         """Renders the fullscreen log viewer screen."""
@@ -326,19 +354,14 @@ class ContainerDashboard:
         # Pull logs if not loaded
         viewport_height = height - 6
         if not self.log_lines:
-            raw_logs = self.client.get_logs(sel["id"], tail=self.log_tail_limit)
-            log_lines = raw_logs.split("\n")
-            if self.log_filter:
-                self.log_lines = [line for line in log_lines if self.log_filter.lower() in line.lower()]
-                if not self.log_lines:
-                    self.log_lines = [f"{YELLOW}(No logs match filter '{self.log_filter}'){RESET}"]
-            else:
-                self.log_lines = log_lines
-            self.log_scroll_index = max(0, len(self.log_lines) - viewport_height)
+            self.load_log_lines(sel["id"], viewport_height, follow=True)
+        elif self.log_follow and time.time() - self.last_log_refresh >= self.refresh_interval:
+            self.load_log_lines(sel["id"], viewport_height, follow=True)
 
         filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
         limit_status = f" [LIMIT: {self.log_tail_limit} lines]"
-        title_text = f"LOGS: {sel['name']}{filter_status}{limit_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
+        follow_status = " [FOLLOW]" if self.log_follow else ""
+        title_text = f"LOGS: {sel['name']}{filter_status}{limit_status}{follow_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
         
@@ -355,7 +378,49 @@ class ContainerDashboard:
             print("")
 
         print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[↑/↓] Scroll | [/] Filter | [C] Clear Filter | [+/-] Limit logs | [G] Refresh | [Esc/L] Back{RESET}")
+        print(f"{CYAN}[↑/↓] Scroll | [F] Follow | [/] Filter | [C] Clear Filter | [+/-] Limit | [G] Refresh | [?] Help | [Esc/L] Back{RESET}")
+
+    def draw_help_view(self):
+        """Renders a compact keyboard help screen."""
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+        except Exception:
+            width = 80
+
+        print("\033[2J\033[H", end="")
+        title_text = "DockTUI Help"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}\n")
+        print(f"{BOLD}Global{RESET}")
+        print("  Tab / 1 / 2  Switch tabs")
+        print("  Up / Down    Move selection or scroll")
+        print("  G            Refresh current data")
+        print("  ?            Open or close this help screen")
+        print("  Q / Esc      Quit or return to the previous screen\n")
+        print(f"{BOLD}Containers{RESET}")
+        print("  S            Start or stop selected container")
+        print("  R            Restart selected container or reconnect")
+        print("  L            Open logs")
+        print("  I            Inspect container JSON")
+        print("  E            Execute command in running container")
+        print("  N            Rename selected container")
+        print("  / / C        Apply or clear container filter\n")
+        print(f"{BOLD}Logs{RESET}")
+        print("  F            Toggle follow mode")
+        print("  + / -        Increase or decrease log tail limit")
+        print("  / / C        Apply or clear log filter")
+        print("  G            Refresh logs now\n")
+        print(f"{BOLD}Images and cleanup{RESET}")
+        print("  D            Delete selected image")
+        print("  P            Open Docker disk usage")
+        print("  X            Run prune after typing PRUNE")
+        print("\n" + "═" * (width - 1))
+        print(f"{CYAN}[? / Esc / Q] Return to previous screen{RESET}")
 
     def draw_inspect_view(self):
         """Renders the scrollable inspect JSON screen."""
@@ -480,9 +545,11 @@ class ContainerDashboard:
                 self.draw_system_view()
             elif self.view_mode == "exec":
                 self.draw_exec_view()
+            elif self.view_mode == "help":
+                self.draw_help_view()
 
             # Auto-refresh main dashboard every 2 seconds
-            if self.view_mode == "main" and (time.time() - self.last_refresh > 2.0):
+            if self.view_mode == "main" and (time.time() - self.last_refresh > self.refresh_interval):
                 self.refresh_data()
 
             # Check for keyboard input
@@ -490,14 +557,22 @@ class ContainerDashboard:
             if key:
                 if self.view_mode == "logs":
                     if key == "up":
+                        self.log_follow = False
                         if self.log_scroll_index > 0:
                             self.log_scroll_index -= 1
                     elif key == "down":
+                        self.log_follow = False
                         if self.log_scroll_index < len(self.log_lines) - viewport_h:
                             self.log_scroll_index += 1
                     elif key == "g":
                         self.log_lines = []
+                        self.last_log_refresh = 0.0
                         self.set_status("Logs refreshed.")
+                    elif key == "f":
+                        self.log_follow = not self.log_follow
+                        self.log_lines = []
+                        mode = "enabled" if self.log_follow else "disabled"
+                        self.set_status(f"Log follow mode {mode}.")
                     elif key == "/":
                         query = self.prompt_user("Enter search term: ")
                         self.log_filter = query
@@ -514,8 +589,13 @@ class ContainerDashboard:
                         self.log_tail_limit = max(10, self.log_tail_limit - 10)
                         self.log_lines = []
                         self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
+                    elif key == "?":
+                        self.open_help()
                     elif key in ("q", "l", "\x1b"):
                         self.view_mode = "main"
+                elif self.view_mode == "help":
+                    if key in ("?", "q", "\x1b"):
+                        self.close_help()
                 elif self.view_mode == "inspect":
                     if key == "up":
                         if self.inspect_scroll_index > 0:
@@ -526,6 +606,8 @@ class ContainerDashboard:
                             self.inspect_scroll_index += 1
                     elif key in ("i", "\x1b"):  # 'i' or 'Esc'
                         self.view_mode = "main"
+                    elif key == "?":
+                        self.open_help()
                 elif self.view_mode == "system":
                     if key == "x":
                         confirm = self.prompt_user("Type PRUNE to clean unused Docker resources: ")
@@ -544,6 +626,8 @@ class ContainerDashboard:
                         self.refresh_data()
                     elif key in ("p", "\x1b"):
                         self.view_mode = "main"
+                    elif key == "?":
+                        self.open_help()
                 elif self.view_mode == "exec":
                     if key == "up":
                         if self.exec_scroll_index > 0:
@@ -572,6 +656,8 @@ class ContainerDashboard:
                                 self.exec_scroll_index = 0
                     elif key in ("q", "\x1b"):
                         self.view_mode = "main"
+                    elif key == "?":
+                        self.open_help()
                 else:
                     # Dashboard controls (main view)
                     if key == "q":
@@ -602,6 +688,8 @@ class ContainerDashboard:
                     elif key == "g":
                         self.set_status("Refreshing data...")
                         self.refresh_data()
+                    elif key == "?":
+                        self.open_help()
                     elif key == "/":
                         query = self.prompt_user("Filter containers (name/image): ")
                         self.container_filter = query
@@ -620,6 +708,8 @@ class ContainerDashboard:
                         if self.containers:
                             self.log_filter = ""  # Reset log filter on enter
                             self.log_lines = []   # Force reload logs
+                            self.log_follow = False
+                            self.last_log_refresh = 0.0
                             self.view_mode = "logs"
                     elif key == "i" and self.current_tab == "containers":
                         if self.containers:

@@ -30,6 +30,8 @@ class TestDockerClient(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=1)
         self.assertFalse(self.client.is_daemon_running())
 
+        self.assertEqual(mock_run.call_args.kwargs["timeout"], self.client.timeout)
+
     @patch("subprocess.run")
     def test_list_containers(self, mock_run):
         self.client.docker_bin = "docker"
@@ -159,6 +161,15 @@ class TestDockerClient(unittest.TestCase):
         output = self.client.exec_command("c123", 'sh -c "echo')
 
         self.assertIn("Invalid command", output)
+
+    @patch("subprocess.run")
+    def test_get_logs_reports_timeout(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["docker", "logs"], timeout=10)
+
+        output = self.client.get_logs("c123")
+
+        self.assertIn("Timed out reading logs", output)
 
 if __name__ == "__main__":
     unittest.main()

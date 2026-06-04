@@ -6,8 +6,14 @@ from typing import Dict, List, Optional, Tuple
 class DockerClient:
     """Interacts with the local Docker daemon via the Docker CLI command line."""
 
-    def __init__(self):
+    def __init__(self, timeout: float = 10.0):
         self.docker_bin = shutil.which("docker")
+        self.timeout = timeout
+
+    def _run(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
+        """Runs Docker CLI commands with a default timeout."""
+        kwargs.setdefault("timeout", self.timeout)
+        return subprocess.run(cmd, **kwargs)
 
     def is_docker_installed(self) -> bool:
         """Checks if Docker CLI is installed and available in system PATH."""
@@ -18,14 +24,14 @@ class DockerClient:
         if not self.is_docker_installed():
             return False
         try:
-            res = subprocess.run(
+            res = self._run(
                 [self.docker_bin, "info"],
                 capture_output=True,
                 text=True,
                 check=False
             )
             return res.returncode == 0
-        except Exception:
+        except (subprocess.TimeoutExpired, Exception):
             return False
 
     def list_containers(self) -> List[Dict[str, str]]:
@@ -42,7 +48,7 @@ class DockerClient:
         ]
 
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
             containers = []
             for line in res.stdout.strip().split("\n"):
                 if not line:
@@ -57,7 +63,7 @@ class DockerClient:
                         "image": parts[4]
                     })
             return containers
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
 
     def get_container_stats(self) -> Dict[str, Dict[str, str]]:
@@ -75,7 +81,7 @@ class DockerClient:
 
         stats_dict = {}
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
             for line in res.stdout.strip().split("\n"):
                 if not line:
                     continue
@@ -89,7 +95,7 @@ class DockerClient:
                         "net": parts[4]
                     }
             return stats_dict
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return {}
 
     def start_container(self, container_id: str) -> bool:
@@ -97,9 +103,9 @@ class DockerClient:
         if not self.is_docker_installed():
             return False
         try:
-            res = subprocess.run([self.docker_bin, "start", container_id], capture_output=True, check=True)
+            res = self._run([self.docker_bin, "start", container_id], capture_output=True, check=True)
             return res.returncode == 0
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return False
 
     def stop_container(self, container_id: str) -> bool:
@@ -107,9 +113,9 @@ class DockerClient:
         if not self.is_docker_installed():
             return False
         try:
-            res = subprocess.run([self.docker_bin, "stop", container_id], capture_output=True, check=True)
+            res = self._run([self.docker_bin, "stop", container_id], capture_output=True, check=True)
             return res.returncode == 0
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return False
 
     def restart_container(self, container_id: str) -> bool:
@@ -117,9 +123,9 @@ class DockerClient:
         if not self.is_docker_installed():
             return False
         try:
-            res = subprocess.run([self.docker_bin, "restart", container_id], capture_output=True, check=True)
+            res = self._run([self.docker_bin, "restart", container_id], capture_output=True, check=True)
             return res.returncode == 0
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return False
 
     def get_logs(self, container_id: str, tail: int = 40) -> str:
@@ -127,7 +133,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         try:
-            res = subprocess.run(
+            res = self._run(
                 [self.docker_bin, "logs", f"--tail={tail}", container_id],
                 capture_output=True,
                 text=True,
@@ -136,6 +142,8 @@ class DockerClient:
                 errors="replace"
             )
             return res.stdout or res.stderr or "(no logs available)"
+        except subprocess.TimeoutExpired:
+            return f"Timed out reading logs after {self.timeout:g} seconds."
         except Exception as e:
             return f"Error reading logs: {str(e)}"
 
@@ -144,7 +152,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         try:
-            res = subprocess.run(
+            res = self._run(
                 [self.docker_bin, "inspect", container_id],
                 capture_output=True,
                 text=True,
@@ -152,6 +160,8 @@ class DockerClient:
                 encoding="utf-8"
             )
             return res.stdout or res.stderr or "No inspect data."
+        except subprocess.TimeoutExpired:
+            return f"Timed out inspecting container after {self.timeout:g} seconds."
         except Exception as e:
             return f"Error inspecting container: {str(e)}"
 
@@ -160,7 +170,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         try:
-            res = subprocess.run(
+            res = self._run(
                 [self.docker_bin, "system", "df"],
                 capture_output=True,
                 text=True,
@@ -168,6 +178,8 @@ class DockerClient:
                 encoding="utf-8"
             )
             return res.stdout or res.stderr or "No disk usage data."
+        except subprocess.TimeoutExpired:
+            return f"Timed out reading disk usage after {self.timeout:g} seconds."
         except Exception as e:
             return f"Error reading disk usage: {str(e)}"
 
@@ -176,7 +188,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         try:
-            res = subprocess.run(
+            res = self._run(
                 [self.docker_bin, "system", "prune", "-f"],
                 capture_output=True,
                 text=True,
@@ -184,6 +196,8 @@ class DockerClient:
                 encoding="utf-8"
             )
             return res.stdout or res.stderr or "Prune completed with no output."
+        except subprocess.TimeoutExpired:
+            return f"Timed out running prune after {self.timeout:g} seconds."
         except Exception as e:
             return f"Error running prune command: {str(e)}"
 
@@ -201,7 +215,7 @@ class DockerClient:
         ]
 
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
             images = []
             for line in res.stdout.strip().split("\n"):
                 if not line:
@@ -215,7 +229,7 @@ class DockerClient:
                         "size": parts[3]
                     })
             return images
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
 
     def remove_image(self, image_id: str) -> Tuple[bool, str]:
@@ -223,7 +237,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return False, "Docker not installed."
         try:
-            res = subprocess.run(
+            res = self._run(
                 [self.docker_bin, "rmi", image_id],
                 capture_output=True,
                 text=True,
@@ -234,6 +248,8 @@ class DockerClient:
                 return True, f"Successfully removed image {image_id}."
             else:
                 return False, res.stderr or f"Failed to remove image {image_id}."
+        except subprocess.TimeoutExpired:
+            return False, f"Timed out removing image after {self.timeout:g} seconds."
         except Exception as e:
             return False, f"Error removing image: {str(e)}"
 
@@ -242,7 +258,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return False, "Docker not installed."
         try:
-            res = subprocess.run(
+            res = self._run(
                 [self.docker_bin, "rename", container_id, new_name],
                 capture_output=True,
                 text=True,
@@ -253,6 +269,8 @@ class DockerClient:
                 return True, f"Successfully renamed container to {new_name}."
             else:
                 return False, res.stderr or f"Failed to rename container to {new_name}."
+        except subprocess.TimeoutExpired:
+            return False, f"Timed out renaming container after {self.timeout:g} seconds."
         except Exception as e:
             return False, f"Error renaming container: {str(e)}"
 
@@ -269,7 +287,7 @@ class DockerClient:
         
         cmd = [self.docker_bin, "exec", container_id] + cmd_parts
         try:
-            res = subprocess.run(
+            res = self._run(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -277,5 +295,7 @@ class DockerClient:
                 encoding="utf-8"
             )
             return res.stdout or res.stderr or "(Command executed with no output)"
+        except subprocess.TimeoutExpired:
+            return f"Timed out executing command after {self.timeout:g} seconds."
         except Exception as e:
             return f"Error executing command: {str(e)}"

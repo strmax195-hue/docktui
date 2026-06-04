@@ -73,12 +73,21 @@ Simply run:
 docktui
 ```
 
+Useful options:
+
+```bash
+docktui --version
+docktui --refresh-interval 5
+docktui --docker-timeout 15
+```
+
 ### Hotkeys & Keyboard Navigation
 
 #### Global Controls
 - **`Tab` or `1` / `2`**: Switch between **Containers** and **Images** tabs.
 - **`↑` / `↓` (Arrow Keys)**: Navigate list items.
 - **`G`**: Force refresh data.
+- **`?`**: Open the in-app keyboard help screen.
 - **`Q`**: Exit DockTUI.
 
 #### Containers Tab
@@ -100,6 +109,7 @@ docktui
 - **`↑` / `↓` (Arrow Keys)**: Scroll content line-by-line.
 - **`Esc` or View Key**: Return back to the main dashboard.
 - **Logs View Features**:
+  - `F`: Toggle follow mode to keep refreshing and pinning logs to the newest lines.
   - `/`: Search/filter logs for specific terms.
   - `C`: Clear active log filter.
   - `+` / `-`: Increase/decrease log line retrieval limits.

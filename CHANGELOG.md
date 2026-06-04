@@ -10,9 +10,13 @@ All notable changes to DockTUI are documented here.
 - Docker system disk usage and prune view.
 - Scrollable log, inspect, and exec output views.
 - Cross-platform unit test workflow for GitHub Actions.
+- `--version`, `--refresh-interval`, and `--docker-timeout` CLI options.
+- In-app help screen via `?`.
+- Follow-mode logs via `F`.
 
 ### Changed
 - Docker daemon checks are cached so the render loop stays responsive.
+- Docker CLI commands now use a default timeout so slow commands do not hang forever.
 - Project metadata now points to the public GitHub repository.
 - README now includes a visual preview, clearer positioning, roadmap, and release links.
 

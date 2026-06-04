@@ -4,7 +4,6 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 
 ## Near term
 
-- Follow-mode logs with pause/resume.
 - Docker Compose grouping by project and service labels.
 - Safer image cleanup flow with dangling-only and selected-image prune modes.
 - Saved exec command presets such as `sh`, `bash`, `env`, and `ls -la`.
