@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="220" viewBox="0 0 760 220" role="img" aria-labelledby="title desc">
+  <title id="title">DockTUI logo</title>
+  <desc id="desc">DockTUI wordmark with a terminal container mark.</desc>
+  <rect width="760" height="220" fill="none"/>
+  <g transform="translate(70 42)">
+    <rect x="0" y="0" width="136" height="136" rx="28" fill="#111827"/>
+    <rect x="13" y="13" width="110" height="110" rx="22" fill="#172033" stroke="#38bdf8" stroke-width="4"/>
+    <rect x="34" y="44" width="68" height="48" rx="6" fill="#e5edf7"/>
+    <rect x="40" y="51" width="13" height="24" rx="2" fill="#1f2937"/>
+    <rect x="59" y="51" width="13" height="24" rx="2" fill="#1f2937"/>
+    <rect x="78" y="51" width="13" height="24" rx="2" fill="#1f2937"/>
+    <path d="M34 88h68" stroke="#64748b" stroke-width="6" stroke-linecap="round"/>
+    <path d="M14 113 0 137h136l-14-24" fill="#0f172a"/>
+    <circle cx="22" cy="22" r="4" fill="#22c55e"/>
+    <circle cx="36" cy="22" r="4" fill="#facc15"/>
+    <circle cx="50" cy="22" r="4" fill="#ef4444"/>
+  </g>
+  <text x="238" y="105" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="64" font-weight="800" fill="#1f2937">DockTUI</text>
+  <text x="242" y="146" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="23" fill="#475569">Zero-dependency Docker dashboard for your terminal</text>
+  <text x="244" y="178" font-family="Consolas, Menlo, monospace" font-size="18" fill="#0ea5e9">containers • compose • logs • exec • volumes • contexts</text>
+</svg>
