@@ -633,6 +633,20 @@ class DockerClient:
 
         env = config.get("Env") or []
         labels = config.get("Labels") or {}
+
+        ip_lines = []
+        for net_name, net_data in networks.items():
+            ip = net_data.get("IPAddress", "")
+            gateway = net_data.get("Gateway", "")
+            mac = net_data.get("MacAddress", "")
+            if ip:
+                detail_str = f"{net_name}: {ip}"
+                if gateway:
+                    detail_str += f" (Gateway: {gateway})"
+                if mac:
+                    detail_str += f" [MAC: {mac}]"
+                ip_lines.append(detail_str)
+
         return {
             "id": data.get("Id", "")[:12],
             "name": (data.get("Name") or "").lstrip("/"),
@@ -644,6 +658,7 @@ class DockerClient:
             "ports": "\n".join(port_lines) or "(none)",
             "mounts": "\n".join(mount_lines) or "(none)",
             "networks": ", ".join(networks.keys()) or "(none)",
+            "ip_details": "\n".join(ip_lines) or "(none)",
             "env": "\n".join(env[:20]) or "(none)",
             "labels": "\n".join(f"{k}={v}" for k, v in labels.items()) or "(none)",
         }
@@ -693,3 +708,158 @@ class DockerClient:
             return False, f"Timed out removing network after {self.timeout:g} seconds."
         except Exception as e:
             return False, f"Error removing network: {str(e)}"
+
+    def run_compose_cmd(self, project_name: str, config_file: str, action: str) -> Tuple[bool, str]:
+        """Runs a docker compose command on a project (up, down, build, etc.)."""
+        if not self.is_docker_installed():
+            return False, "Docker not installed."
+
+        cmd = [self.docker_bin]
+        if config_file:
+            files = [f.strip() for f in config_file.split(",") if f.strip()]
+            for f in files:
+                cmd += ["-f", f]
+        else:
+            cmd += ["-p", project_name]
+
+        cmd += ["compose"]
+        if action == "up":
+            cmd += ["up", "-d"]
+        elif action == "up-build":
+            cmd += ["up", "-d", "--build"]
+        elif action == "down":
+            cmd += ["down"]
+        elif action == "build":
+            cmd += ["build"]
+        elif action == "restart":
+            cmd += ["restart"]
+        else:
+            return False, f"Unknown compose action: {action}"
+
+        try:
+            res = self._run(cmd, capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                stdout_err = res.stdout or res.stderr or ""
+                return True, stdout_err.strip() or f"Compose {action} succeeded."
+            else:
+                stderr = res.stderr or res.stdout or "Unknown error"
+                return False, stderr.strip()
+        except Exception as e:
+            return False, f"Failed to execute compose: {str(e)}"
+
+    def generate_compose_snippet(self, container_id: str) -> str:
+        """Generates a docker-compose.yml snippet representing the container configuration."""
+        if not self.is_docker_installed():
+            return "# Docker not installed."
+        raw = self.inspect_container(container_id)
+        try:
+            data = json.loads(raw)[0]
+        except Exception as e:
+            return f"# Error inspecting container: {e}"
+
+        name = (data.get("Name") or "").lstrip("/")
+        config = data.get("Config") or {}
+        host_config = data.get("HostConfig") or {}
+        network_settings = data.get("NetworkSettings") or {}
+
+        service_name = name.replace("-", "_").lower()
+        if not service_name:
+            service_name = "myservice"
+
+        lines = []
+        lines.append("version: '3.8'")
+        lines.append("services:")
+        lines.append(f"  {service_name}:")
+        lines.append(f"    container_name: {name}")
+
+        image = config.get("Image")
+        if image:
+            lines.append(f"    image: {image}")
+
+        restart = host_config.get("RestartPolicy", {}).get("Name")
+        if restart and restart != "no":
+            lines.append(f"    restart: {restart}")
+
+        if host_config.get("Privileged"):
+            lines.append("    privileged: true")
+
+        entrypoint = config.get("Entrypoint")
+        if entrypoint:
+            if isinstance(entrypoint, list):
+                lines.append(f"    entrypoint: {json.dumps(entrypoint)}")
+            else:
+                lines.append(f"    entrypoint: {entrypoint}")
+
+        cmd = config.get("Cmd")
+        if cmd:
+            if isinstance(cmd, list):
+                lines.append(f"    command: {json.dumps(cmd)}")
+            else:
+                lines.append(f"    command: {cmd}")
+
+        working_dir = config.get("WorkingDir")
+        if working_dir:
+            lines.append(f"    working_dir: {working_dir}")
+
+        user = config.get("User")
+        if user:
+            lines.append(f"    user: {user}")
+
+        hostname = config.get("Hostname")
+        if hostname:
+            lines.append(f"    hostname: {hostname}")
+
+        ports = host_config.get("PortBindings") or {}
+        if ports:
+            lines.append("    ports:")
+            for container_port, bindings in ports.items():
+                if bindings:
+                    for binding in bindings:
+                        host_ip = binding.get("HostIp", "")
+                        host_port = binding.get("HostPort", "")
+                        if host_ip and host_ip != "0.0.0.0":
+                            lines.append(f"      - \"{host_ip}:{host_port}:{container_port}\"")
+                        else:
+                            lines.append(f"      - \"{host_port}:{container_port}\"")
+                else:
+                    lines.append(f"      - \"{container_port}\"")
+
+        binds = host_config.get("Binds") or []
+        if binds:
+            lines.append("    volumes:")
+            for bind in binds:
+                lines.append(f"      - {bind}")
+
+        env = config.get("Env") or []
+        env_lines = []
+        for e in env:
+            if "=" in e:
+                k, v = e.split("=", 1)
+                if k in ("PATH", "HOME", "HOSTNAME", "TERM"):
+                    continue
+                env_lines.append(f"      - {k}={v}")
+        if env_lines:
+            lines.append("    environment:")
+            lines.extend(env_lines)
+
+        networks = network_settings.get("Networks") or {}
+        if networks and list(networks.keys()) != ["bridge"]:
+            lines.append("    networks:")
+            for net_name in networks.keys():
+                lines.append(f"      - {net_name}")
+
+        extra_hosts = host_config.get("ExtraHosts")
+        if extra_hosts:
+            lines.append("    extra_hosts:")
+            for host in extra_hosts:
+                lines.append(f"      - \"{host}\"")
+
+        labels = config.get("Labels") or {}
+        clean_labels = {k: v for k, v in labels.items() if not k.startswith("com.docker.compose.")}
+        if clean_labels:
+            lines.append("    labels:")
+            for k, v in clean_labels.items():
+                lines.append(f"      - \"{k}={v}\"")
+
+        return "\n".join(lines)
+

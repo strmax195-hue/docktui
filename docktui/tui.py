@@ -4,28 +4,55 @@ import time
 import signal
 import threading
 from pathlib import Path
-from typing import Callable, List, Dict, Optional
+from typing import Callable, List, Dict, Optional, Tuple
 from .docker_client import DockerClient
 
-# ANSI colors for styling
-if os.environ.get("NO_COLOR"):
-    RESET = ""
-    BOLD = ""
-    CYAN = ""
-    GREEN = ""
-    RED = ""
-    YELLOW = ""
-    WHITE_ON_BLUE = ""
-    BG_DARK_GRAY = ""
-else:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    CYAN = "\033[36m"
-    GREEN = "\033[32m"
-    RED = "\033[31m"
-    YELLOW = "\033[33m"
-    WHITE_ON_BLUE = "\033[37;44m"
-    BG_DARK_GRAY = "\033[90m"
+# ANSI colors for styling (initialized to defaults, modifiable via apply_theme_colors)
+RESET = ""
+BOLD = ""
+CYAN = ""
+GREEN = ""
+RED = ""
+YELLOW = ""
+WHITE_ON_BLUE = ""
+BG_DARK_GRAY = ""
+
+def apply_theme_colors(theme_name: str):
+    global RESET, BOLD, CYAN, GREEN, RED, YELLOW, WHITE_ON_BLUE, BG_DARK_GRAY
+    if os.environ.get("NO_COLOR") or theme_name == "high-contrast":
+        RESET = ""
+        BOLD = ""
+        CYAN = ""
+        GREEN = ""
+        RED = ""
+        YELLOW = ""
+        WHITE_ON_BLUE = ""
+        BG_DARK_GRAY = ""
+        if theme_name == "high-contrast":
+            RESET = "\033[0m"
+            BOLD = "\033[1m"
+            WHITE_ON_BLUE = "\033[7m"  # reverse video
+    elif theme_name == "light":
+        RESET = "\033[0m"
+        BOLD = "\033[1m"
+        CYAN = "\033[34m"            # blue
+        GREEN = "\033[32m"           # dark green
+        RED = "\033[31m"             # dark red
+        YELLOW = "\033[33m"          # brown/yellow
+        WHITE_ON_BLUE = "\033[30;47m"  # black on light gray
+        BG_DARK_GRAY = "\033[37m"      # white/light gray
+    else:  # dark (default)
+        RESET = "\033[0m"
+        BOLD = "\033[1m"
+        CYAN = "\033[36m"
+        GREEN = "\033[32m"
+        RED = "\033[31m"
+        YELLOW = "\033[33m"
+        WHITE_ON_BLUE = "\033[37;44m"
+        BG_DARK_GRAY = "\033[90m"
+
+# Initialize theme defaults
+apply_theme_colors("dark")
 
 RESIZE_REQUESTED = False
 
@@ -111,9 +138,16 @@ except ImportError:
 class ContainerDashboard:
     """The main TUI rendering and interaction loop."""
 
-    def __init__(self, refresh_interval: float = 2.0, docker_timeout: float = 10.0, docker_host: Optional[str] = None):
+    def __init__(self, refresh_interval: float = 2.0, docker_timeout: float = 10.0, docker_host: Optional[str] = None, theme: Optional[str] = None, exec_presets: Optional[List[str]] = None, log_tail_limit: Optional[int] = None):
         self.client = DockerClient(timeout=docker_timeout, host=docker_host)
         self.refresh_interval = refresh_interval
+        self.theme = theme or "dark"
+        apply_theme_colors(self.theme)
+
+        # filters dictionary for all tabs
+        self.tabs = ["containers", "compose", "images", "volumes", "networks", "contexts"]
+        self.filters: Dict[str, str] = {tab: "" for tab in self.tabs}
+
         self.containers: List[Dict[str, str]] = []
         self.stats: Dict[str, Dict[str, str]] = {}
         self.images: List[Dict[str, str]] = []
@@ -128,7 +162,6 @@ class ContainerDashboard:
         self.selected_network_index = 0
         self.selected_compose_index = 0
         self.selected_context_index = 0
-        self.tabs = ["containers", "compose", "images", "volumes", "networks", "contexts"]
         self.current_tab = "containers"
         self.view_mode = "main"  # 'main', 'logs', 'inspect', 'details', 'top', 'system', 'exec', 'input', or 'help'
         self.previous_view_mode = "main"
@@ -139,7 +172,6 @@ class ContainerDashboard:
         self.log_search = ""
         self.log_match_index = 0
         self.log_errors_only = False
-        self.container_filter = ""
         self.state_filter = "all"
         self.sort_mode = "default"
         self.inspect_lines: List[str] = []
@@ -148,7 +180,7 @@ class ContainerDashboard:
         self.details_scroll_index = 0
         self.top_lines: List[str] = []
         self.top_scroll_index = 0
-        self.log_tail_limit = 40
+        self.log_tail_limit = log_tail_limit or 40
         self.log_lines: List[str] = []
         self.log_scroll_index = 0
         self.log_follow = False
@@ -157,15 +189,28 @@ class ContainerDashboard:
         self.exec_scroll_index = 0
         self.exec_command_text = ""
         self.exec_history: List[str] = []
-        self.exec_presets = ["sh", "bash", "env", "ls -la", "cat /etc/os-release"]
+        self.exec_presets = exec_presets or ["sh", "bash", "env", "ls -la", "cat /etc/os-release"]
         self.system_info_text = ""
         self.current_context = ""
         self.active_project: Optional[str] = None
         self.daemon_running = False
         self.last_daemon_check = 0.0
         self.daemon_check_interval = 3.0
+        self.compose_snippet_lines: List[str] = []
+        self.compose_snippet_scroll_index = 0
+        self.log_stream_process = None
+        self.log_stream_threads = []
         self.data_lock = threading.Lock()
         self.refresh_requested = threading.Event()
+
+    @property
+    def container_filter(self) -> str:
+        return self.filters.get("containers") or ""
+
+    @container_filter.setter
+    def container_filter(self, val: str):
+        self.filters["containers"] = val
+        self.filters["compose"] = val
         self.stop_refresh = threading.Event()
         self.refresh_thread: Optional[threading.Thread] = None
         self.refresh_in_progress = False
@@ -186,6 +231,9 @@ class ContainerDashboard:
 
     def export_top_to_file(self, filepath: str):
         self._export_lines_to_file(self.top_lines, "Processes", filepath)
+
+    def export_compose_snippet_to_file(self, filepath: str):
+        self._export_lines_to_file(self.compose_snippet_lines, "Compose Snippet", filepath)
 
     def _export_lines_to_file(self, lines: List[str], type_name: str, filepath: str):
         if not filepath:
@@ -357,17 +405,18 @@ class ContainerDashboard:
         except Exception:
             return ""
 
-    def get_percentage_bar(self, percentage_str: str, width: int = 15) -> str:
+    def get_percentage_bar(self, percentage_str: str, width: int = 15) -> Tuple[str, bool]:
         """Generates a beautiful block progress bar for resource usage."""
         try:
             val = float(percentage_str.replace('%', '').strip())
             val = max(0.0, min(100.0, val))
             filled_len = int(round(width * val / 100.0))
             bar = "█" * filled_len + "░" * (width - filled_len)
-            return f"[{bar}] {percentage_str}"
+            is_high = val >= 80.0
+            return f"[{bar}] {percentage_str}", is_high
         except Exception:
             # Fallback if loading or N/A
-            return f"[░░░░░░░░░░░░░░░] {percentage_str}"
+            return f"[░░░░░░░░░░░░░░░] {percentage_str}", False
 
     def truncate(self, text: str, length: int) -> str:
         if len(text) > length:
@@ -422,7 +471,21 @@ class ContainerDashboard:
         rows: List[Dict[str, object]] = []
         for project in sorted(groups):
             project_containers = sorted(groups[project], key=lambda c: (c.get("compose_service", ""), c.get("name", "")))
-            rows.append({"type": "project", "project": project, "containers": project_containers})
+            working_dir = ""
+            config_file = ""
+            for container in project_containers:
+                labels = container.get("labels", {})
+                if "com.docker.compose.project.working_dir" in labels:
+                    working_dir = labels["com.docker.compose.project.working_dir"]
+                if "com.docker.compose.project.config_files" in labels:
+                    config_file = labels["com.docker.compose.project.config_files"]
+            rows.append({
+                "type": "project",
+                "project": project,
+                "containers": project_containers,
+                "working_dir": working_dir,
+                "config_file": config_file
+            })
             for container in project_containers:
                 rows.append({"type": "container", "project": project, "container": container})
         if loose:
@@ -456,6 +519,85 @@ class ContainerDashboard:
         if follow or self.log_scroll_index >= max(0, len(self.log_lines) - viewport_height - 1):
             self.log_scroll_index = max(0, len(self.log_lines) - viewport_height)
         self.last_log_refresh = time.time()
+
+    def is_log_streaming(self) -> bool:
+        return hasattr(self, "log_stream_process") and self.log_stream_process is not None and self.log_stream_process.poll() is None
+
+    def start_log_stream(self, container_id: Optional[str], project_name: Optional[str]):
+        if self.is_log_streaming():
+            return
+        self.stop_log_stream()
+        
+        cmd = [self.client.docker_bin]
+        if container_id is None and project_name:
+            cmd += ["compose", "-p", project_name, "logs", "-f", f"--tail={self.log_tail_limit}"]
+        else:
+            cmd += ["logs", "-f", f"--tail={self.log_tail_limit}", container_id]
+            
+        try:
+            self.log_stream_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1
+            )
+        except Exception as e:
+            self.set_status(f"Error starting log stream: {e}")
+            return
+            
+        self.log_stream_threads = []
+        for stream in (self.log_stream_process.stdout, self.log_stream_process.stderr):
+            t = threading.Thread(target=self._log_stream_reader, args=(stream,), daemon=True)
+            t.start()
+            self.log_stream_threads.append(t)
+
+    def _log_stream_reader(self, stream):
+        while self.is_log_streaming():
+            try:
+                line = stream.readline()
+                if not line:
+                    break
+                line = line.rstrip("\n")
+                
+                # Apply error/warning filter
+                if self.log_errors_only:
+                    if not ("error" in line.lower() or "warn" in line.lower() or "exception" in line.lower()):
+                        continue
+                # Apply text search filter
+                if self.log_filter:
+                    if self.log_filter.lower() not in line.lower():
+                        continue
+                        
+                with self.data_lock:
+                    self.log_lines.append(line)
+                    if len(self.log_lines) > self.log_tail_limit:
+                        self.log_lines.pop(0)
+                        
+                    try:
+                        viewport_h = max(24, os.get_terminal_size().lines) - 6
+                    except Exception:
+                        viewport_h = 18
+                    self.log_scroll_index = max(0, len(self.log_lines) - viewport_h)
+                
+                self.need_redraw = True
+            except Exception:
+                break
+
+    def stop_log_stream(self):
+        if hasattr(self, "log_stream_process") and self.log_stream_process:
+            try:
+                self.log_stream_process.terminate()
+                self.log_stream_process.wait(timeout=0.2)
+            except Exception:
+                try:
+                    self.log_stream_process.kill()
+                except Exception:
+                    pass
+            self.log_stream_process = None
+        self.log_stream_threads = []
 
     def jump_to_next_log_match(self, viewport_height: int):
         """Moves the log viewport to the next search match."""
@@ -494,6 +636,9 @@ class ContainerDashboard:
         lines.append("")
         lines.append("Networks:")
         lines.append(f"  {details.get('networks', '')}")
+        lines.append("")
+        lines.append("IP Details:")
+        lines.extend(f"  {line}" for line in details.get("ip_details", "").split("\n"))
         lines.append("")
         lines.append("Environment:")
         lines.extend(f"  {line}" for line in details.get("env", "").split("\n"))
@@ -586,6 +731,9 @@ class ContainerDashboard:
                     self.selected_compose_index = 0
         elif current_tab == "images":
             images = self.client.list_images()
+            filter_val = self.filters.get("images", "").lower()
+            if filter_val:
+                images = [img for img in images if filter_val in img["repository"].lower() or filter_val in img["tag"].lower() or filter_val in img["id"].lower()]
             with self.data_lock:
                 self.current_context = current_context
                 self.images = images
@@ -593,6 +741,9 @@ class ContainerDashboard:
                     self.selected_image_index = max(0, len(self.images) - 1)
         elif current_tab == "volumes":
             volumes = self.client.list_volumes()
+            filter_val = self.filters.get("volumes", "").lower()
+            if filter_val:
+                volumes = [v for v in volumes if filter_val in v["name"].lower() or filter_val in v["driver"].lower()]
             with self.data_lock:
                 self.current_context = current_context
                 self.volumes = volumes
@@ -600,6 +751,9 @@ class ContainerDashboard:
                     self.selected_volume_index = max(0, len(self.volumes) - 1)
         elif current_tab == "networks":
             networks = self.client.list_networks()
+            filter_val = self.filters.get("networks", "").lower()
+            if filter_val:
+                networks = [n for n in networks if filter_val in n["name"].lower() or filter_val in n["driver"].lower() or filter_val in n["id"].lower()]
             with self.data_lock:
                 self.current_context = current_context
                 self.networks = networks
@@ -607,6 +761,9 @@ class ContainerDashboard:
                     self.selected_network_index = max(0, len(self.networks) - 1)
         elif current_tab == "contexts":
             contexts = self.client.list_contexts()
+            filter_val = self.filters.get("contexts", "").lower()
+            if filter_val:
+                contexts = [ctx for ctx in contexts if filter_val in ctx["name"].lower() or filter_val in ctx["endpoint"].lower() or filter_val in ctx["description"].lower()]
             with self.data_lock:
                 self.current_context = current_context
                 self.contexts = contexts
@@ -669,12 +826,14 @@ class ContainerDashboard:
             label = f"{tab_labels[tab]} ({idx})"
             header_parts.append(f"{WHITE_ON_BLUE} {label} {RESET}" if tab == self.current_tab else f"[{label}]")
         filter_bits = []
-        if self.container_filter:
-            filter_bits.append(f"filter: {self.container_filter}")
-        if self.state_filter != "all":
-            filter_bits.append(f"state: {self.state_filter}")
-        if self.sort_mode != "default":
-            filter_bits.append(f"sort: {self.sort_mode}")
+        active_filter = self.filters.get(self.current_tab, "")
+        if active_filter:
+            filter_bits.append(f"filter: {active_filter}")
+        if self.current_tab in ("containers", "compose"):
+            if self.state_filter != "all":
+                filter_bits.append(f"state: {self.state_filter}")
+            if self.sort_mode != "default":
+                filter_bits.append(f"sort: {self.sort_mode}")
         filter_status = "    [" + " | ".join(filter_bits) + "]" if filter_bits else ""
         print("   ".join(header_parts) + filter_status)
         print("─" * (width - 1))
@@ -731,10 +890,16 @@ class ContainerDashboard:
 
                 c_stats = self.stats.get(c_id) or self.stats.get(sel["name"])
                 if c_stats and sel["state"] == "running":
-                    cpu_bar = self.get_percentage_bar(c_stats['cpu'], width=int(width*0.2))
-                    mem_bar = self.get_percentage_bar(c_stats['mem_perc'], width=int(width*0.2))
-                    print(f"  CPU:  {GREEN}{cpu_bar}{RESET}")
-                    print(f"  MEM:  {GREEN}{mem_bar} ({c_stats['memory']}){RESET}")
+                    cpu_bar, cpu_high = self.get_percentage_bar(c_stats['cpu'], width=int(width*0.2))
+                    mem_bar, mem_high = self.get_percentage_bar(c_stats['mem_perc'], width=int(width*0.2))
+                    cpu_color = RED if cpu_high else GREEN
+                    mem_color = RED if mem_high else GREEN
+                    
+                    cpu_alert = f" {RED}{BOLD}[⚠ HIGH CPU]{RESET}" if cpu_high else ""
+                    mem_alert = f" {RED}{BOLD}[⚠ HIGH MEMORY]{RESET}" if mem_high else ""
+                    
+                    print(f"  CPU:  {cpu_color}{cpu_bar}{RESET}{cpu_alert}")
+                    print(f"  MEM:  {mem_color}{mem_bar} ({c_stats['memory']}){RESET}{mem_alert}")
                     print(f"  NET:  {GREEN}{c_stats['net']}{RESET}")
                 else:
                     status_text = "N/A (container stopped)" if sel["state"] != "running" else "Loading stats..."
@@ -768,7 +933,12 @@ class ContainerDashboard:
 
         elif self.current_tab == "images":
             if not self.images:
-                self.draw_empty_state("images", width)
+                active_filter = self.filters.get("images")
+                if active_filter:
+                    print(f"\n{CYAN}No images match the active filter: '{active_filter}'{RESET}")
+                    print("Press [C] to clear the filter.")
+                else:
+                    self.draw_empty_state("images", width)
             else:
                 # Calculate column widths dynamically based on terminal width
                 rem = width - 26
@@ -796,7 +966,12 @@ class ContainerDashboard:
 
         elif self.current_tab == "volumes":
             if not self.volumes:
-                self.draw_empty_state("volumes", width)
+                active_filter = self.filters.get("volumes")
+                if active_filter:
+                    print(f"\n{CYAN}No volumes match the active filter: '{active_filter}'{RESET}")
+                    print("Press [C] to clear the filter.")
+                else:
+                    self.draw_empty_state("volumes", width)
             else:
                 name_w = max(30, int(width * 0.50))
                 driver_w = max(12, int(width * 0.20))
@@ -810,7 +985,12 @@ class ContainerDashboard:
 
         elif self.current_tab == "networks":
             if not self.networks:
-                self.draw_empty_state("networks", width)
+                active_filter = self.filters.get("networks")
+                if active_filter:
+                    print(f"\n{CYAN}No networks match the active filter: '{active_filter}'{RESET}")
+                    print("Press [C] to clear the filter.")
+                else:
+                    self.draw_empty_state("networks", width)
             else:
                 id_w = 12
                 name_w = max(30, int(width * 0.45))
@@ -828,7 +1008,12 @@ class ContainerDashboard:
                 print(f"{YELLOW}{BOLD}Note: DOCKER_HOST is active. Context switching is bypassed (DOCKER_HOST overrides context).{RESET}")
                 print("─" * (width - 1))
             if not self.contexts:
-                self.draw_empty_state("contexts", width)
+                active_filter = self.filters.get("contexts")
+                if active_filter:
+                    print(f"\n{CYAN}No contexts match the active filter: '{active_filter}'{RESET}")
+                    print("Press [C] to clear the filter.")
+                else:
+                    self.draw_empty_state("contexts", width)
             else:
                 name_w = max(20, int(width * 0.25))
                 desc_w = max(24, int(width * 0.30))
@@ -854,8 +1039,14 @@ class ContainerDashboard:
         print("═" * (width - 1))
 
         # Action instructions depending on the active tab
-        if self.current_tab in ("containers", "compose"):
-            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [O] Sort | [Y] State | [?] Help | [Q] Quit{RESET}")
+        if self.current_tab == "compose":
+            row = self.compose_rows[self.selected_compose_index] if self.compose_rows else None
+            if row and row.get("type") == "project":
+                print(f"{CYAN}[U] Up | [D] Down | [B] Build | [R] Restart | [L] Project Logs | [Tab] Switch | [?] Help | [Q] Quit{RESET}")
+            else:
+                print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose Snippet | [O] Sort | [Y] State | [?] Help | [Q] Quit{RESET}")
+        elif self.current_tab == "containers":
+            print(f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose Snippet | [O] Sort | [Y] State | [?] Help | [Q] Quit{RESET}")
         elif self.current_tab == "images":
             print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
         elif self.current_tab == "volumes":
@@ -885,9 +1076,13 @@ class ContainerDashboard:
         # Pull logs if not loaded
         viewport_height = height - 6
         if not self.log_lines:
-            self.load_log_lines(target_id, viewport_height, follow=True)
-        elif self.log_follow and time.time() - self.last_log_refresh >= self.refresh_interval:
-            self.load_log_lines(target_id, viewport_height, follow=True)
+            self.load_log_lines(target_id, viewport_height, follow=self.log_follow)
+            if self.log_follow:
+                self.start_log_stream(target_id, self.active_project)
+        elif self.log_follow and not self.is_log_streaming():
+            self.start_log_stream(target_id, self.active_project)
+        elif not self.log_follow and self.is_log_streaming():
+            self.stop_log_stream()
 
         filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
         search_status = f" [SEARCH: {self.log_search}]" if self.log_search else ""
@@ -930,22 +1125,31 @@ class ContainerDashboard:
         print(f"{CYAN}{BOLD}{title_line}{RESET}")
         print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}\n")
         print(f"{BOLD}Global{RESET}")
-        print("  Tab / 1-5    Switch tabs")
+        print("  Tab / 1-6    Switch tabs")
         print("  Up / Down    Move selection or scroll / Mouse scroll support")
         print("  G            Refresh current data")
+        print("  M            Cycle theme color presets (Dark, Light, High-Contrast)")
         print("  ?            Open or close this help screen")
         print("  Q / Esc      Quit or return to the previous screen\n")
         print(f"{BOLD}Containers{RESET}")
-        print("  S            Start or stop selected container / project")
-        print("  R            Restart selected container / project")
-        print("  L            Open logs (or Compose project logs)")
+        print("  S            Start or stop selected container")
+        print("  R            Restart selected container")
+        print("  L            Open container logs")
         print("  I            Inspect container JSON")
-        print("  E            Execute command in running container")
+        print("  E            Execute command (interactively or in background)")
+        print("  X            Generate and export Compose snippet")
         print("  N            Rename selected container")
         print("  V            Open readable container details")
         print("  T            View container processes (docker top)")
         print("  O / Y        Cycle sorting and state filters")
-        print("  / / C        Apply or clear container filter\n")
+        print("  / / C        Apply or clear text search filter\n")
+        print(f"{BOLD}Compose{RESET}")
+        print("  U            Run 'compose up -d' (with optional --build) on selected project")
+        print("  D            Run 'compose down' on selected project")
+        print("  B            Run 'compose build' on selected project")
+        print("  R            Restart all containers in selected project")
+        print("  S            Start or stop all containers in selected project")
+        print("  L            Open Compose project logs\n")
         print(f"{BOLD}Logs{RESET}")
         print("  F            Toggle follow mode")
         print("  Space        Pause follow mode")
@@ -1151,6 +1355,74 @@ class ContainerDashboard:
         print("\n" + "═" * (width - 1))
         print(f"{CYAN}[↑/↓] Scroll | [R] Run command again | [E] Run different command | [Esc] Return to dashboard{RESET}")
 
+    def draw_compose_snippet_view(self):
+        """Renders the scrollable docker-compose.yml snippet screen."""
+        sel = self.current_selected_container()
+        if not sel:
+            self.view_mode = "main"
+            return
+
+        try:
+            terminal_size = os.get_terminal_size()
+            width = max(80, terminal_size.columns)
+            height = max(24, terminal_size.lines)
+        except Exception:
+            width = 80
+            height = 24
+
+        print("\033[2J\033[H", end="")
+        viewport_height = height - 6
+
+        if not self.compose_snippet_lines:
+            snippet = self.client.generate_compose_snippet(sel["id"])
+            self.compose_snippet_lines = snippet.split("\n")
+            self.compose_snippet_scroll_index = 0
+
+        title_text = f"GENERATE COMPOSE SNIPPET: {sel['name']} (Line {self.compose_snippet_scroll_index + 1} of {len(self.compose_snippet_lines)})"
+        padding = (width - 2 - len(title_text)) // 2
+        title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
+
+        print(f"{CYAN}{BOLD}╔" + "═" * (width - 2) + f"╗{RESET}")
+        print(f"{CYAN}{BOLD}{title_line}{RESET}")
+        print(f"{CYAN}{BOLD}╚" + "═" * (width - 2) + f"╝{RESET}")
+
+        end_idx = min(len(self.compose_snippet_lines), self.compose_snippet_scroll_index + viewport_height)
+        for i in range(self.compose_snippet_scroll_index, end_idx):
+            print(self.compose_snippet_lines[i][:width-1])
+
+        for _ in range(viewport_height - (end_idx - self.compose_snippet_scroll_index)):
+            print("")
+
+        print("\n" + "═" * (width - 1))
+        print(f"{CYAN}[↑/↓] Scroll | [O] Save to file | [Esc/X] Back{RESET}")
+
+    def run_interactive_exec(self, container_id: str, container_name: str, command: str):
+        self.stop_refresh_worker()
+        print("\033[H\033[2J", end="", flush=True)
+        print(f"=== Starting interactive exec session in container '{container_name}' ===")
+        print(f"Command: {command}")
+        print("Type 'exit' to end session and return to DockTUI.\n")
+
+        import shlex
+        try:
+            cmd_parts = shlex.split(command)
+        except ValueError as e:
+            print(f"Error parsing command: {e}")
+            self.start_refresh_worker()
+            self.prompt_user("Press Enter to continue...")
+            return
+
+        cmd = [self.client.docker_bin, "exec", "-it", container_id] + cmd_parts
+        try:
+            subprocess.run(cmd)
+        except Exception as e:
+            print(f"Error running interactive session: {e}")
+            self.prompt_user("Press Enter to continue...")
+
+        self.start_refresh_worker()
+        self.request_refresh()
+        self.need_redraw = True
+
     def run(self):
         """The main dashboard control loop."""
         global RESIZE_REQUESTED
@@ -1189,13 +1461,15 @@ class ContainerDashboard:
                         self.draw_input_view()
                     elif self.view_mode == "help":
                         self.draw_help_view()
+                    elif self.view_mode == "compose_snippet":
+                        self.draw_compose_snippet_view()
 
                 # Auto-refresh main dashboard every 2 seconds
                 if self.view_mode == "main" and (time.time() - self.last_refresh > self.refresh_interval):
                     self.request_refresh()
-                # Auto-refresh logs in follow mode every 2 seconds
-                if self.view_mode == "logs" and self.log_follow and (time.time() - self.last_log_refresh > self.refresh_interval):
-                    self.need_redraw = True
+                # Stop log stream if we navigated away from logs view
+                if self.view_mode != "logs" and self.is_log_streaming():
+                    self.stop_log_stream()
                 if RESIZE_REQUESTED:
                     RESIZE_REQUESTED = False
                     self.request_refresh()
@@ -1227,6 +1501,7 @@ class ContainerDashboard:
                             delta = 3 if key == "scroll_down" else 1
                             self.log_scroll_index = max(0, min(self.log_scroll_index + delta, len(self.log_lines) - viewport_h))
                         elif key == "g":
+                            self.stop_log_stream()
                             self.log_lines = []
                             self.last_log_refresh = 0.0
                             self.set_status("Logs refreshed.")
@@ -1235,11 +1510,13 @@ class ContainerDashboard:
                             self.set_status("Log follow paused.")
                         elif key == "f":
                             self.log_follow = not self.log_follow
+                            self.stop_log_stream()
                             self.log_lines = []
                             mode = "enabled" if self.log_follow else "disabled"
                             self.set_status(f"Log follow mode {mode}.")
                         elif key == "/":
                             query = self.prompt_user("Enter search term: ")
+                            self.stop_log_stream()
                             self.log_search = query
                             self.log_filter = query
                             self.log_match_index = -1
@@ -1248,10 +1525,12 @@ class ContainerDashboard:
                             self.jump_to_next_log_match(viewport_h)
                         elif key == "e":
                             self.log_errors_only = not self.log_errors_only
+                            self.stop_log_stream()
                             self.log_lines = []
                             mode = "enabled" if self.log_errors_only else "disabled"
                             self.set_status(f"Error-only logs {mode}.")
                         elif key == "c":
+                            self.stop_log_stream()
                             self.log_filter = ""
                             self.log_search = ""
                             self.log_errors_only = False
@@ -1259,10 +1538,12 @@ class ContainerDashboard:
                             self.set_status("Cleared log filter.")
                         elif key in ("+", "="):
                             self.log_tail_limit = min(500, self.log_tail_limit + 10)
+                            self.stop_log_stream()
                             self.log_lines = []
                             self.set_status(f"Increased log limit to {self.log_tail_limit} lines.")
                         elif key == "-":
                             self.log_tail_limit = max(10, self.log_tail_limit - 10)
+                            self.stop_log_stream()
                             self.log_lines = []
                             self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
                         elif key == "?":
@@ -1376,13 +1657,26 @@ class ContainerDashboard:
                             self.view_mode = "main"
                         elif key == "?":
                             self.open_help()
+                    elif self.view_mode == "compose_snippet":
+                        if key in ("up", "scroll_up"):
+                            delta = 3 if key == "scroll_up" else 1
+                            self.compose_snippet_scroll_index = max(0, self.compose_snippet_scroll_index - delta)
+                        elif key in ("down", "scroll_down"):
+                            delta = 3 if key == "scroll_down" else 1
+                            self.compose_snippet_scroll_index = max(0, min(self.compose_snippet_scroll_index + delta, len(self.compose_snippet_lines) - viewport_h))
+                        elif key == "o":
+                            self.start_input("Export compose snippet to path: ", self.export_compose_snippet_to_file)
+                        elif key in ("x", "\x1b", "q"):
+                            self.view_mode = "main"
+                        elif key == "?":
+                            self.open_help()
                     else:
                         # Dashboard controls (main view)
                         if key == "q":
                             running = False
                         elif key == "\t":
                             self.cycle_tab()
-                        elif key in ("1", "2", "3", "4", "5"):
+                        elif key in ("1", "2", "3", "4", "5", "6"):
                             self.current_tab = self.tabs[int(key) - 1]
                             self.set_status(f"Switched tab to {self.current_tab}.")
                             self.refresh_data()
@@ -1432,18 +1726,41 @@ class ContainerDashboard:
                         elif key == "?":
                             self.open_help()
                         elif key == "/":
-                            query = self.prompt_user("Filter containers (name/image): ")
-                            self.container_filter = query
+                            prompt_msg = {
+                                "containers": "Filter containers (name/image): ",
+                                "compose": "Filter compose (project/service): ",
+                                "images": "Filter images (repo/tag/id): ",
+                                "volumes": "Filter volumes (name/driver): ",
+                                "networks": "Filter networks (name/driver): ",
+                                "contexts": "Filter contexts (name/endpoint): ",
+                            }.get(self.current_tab, "Filter: ")
+                            query = self.prompt_user(prompt_msg)
+                            self.filters[self.current_tab] = query
                             self.selected_index = 0
                             self.selected_compose_index = 0
+                            self.selected_image_index = 0
+                            self.selected_volume_index = 0
+                            self.selected_network_index = 0
+                            self.selected_context_index = 0
                             self.set_status(f"Filter set to: '{query}'")
                             self.refresh_data()
                         elif key == "c":
-                            self.container_filter = ""
+                            self.filters[self.current_tab] = ""
                             self.selected_index = 0
                             self.selected_compose_index = 0
-                            self.set_status("Cleared container filter.")
+                            self.selected_image_index = 0
+                            self.selected_volume_index = 0
+                            self.selected_network_index = 0
+                            self.selected_context_index = 0
+                            self.set_status(f"Cleared {self.current_tab} filter.")
                             self.refresh_data()
+                        elif key == "m":
+                            themes = ["dark", "light", "high-contrast"]
+                            current_idx = themes.index(self.theme)
+                            self.theme = themes[(current_idx + 1) % len(themes)]
+                            apply_theme_colors(self.theme)
+                            self.set_status(f"Switched theme to {self.theme}.")
+                            self.need_redraw = True
                         elif key == "o":
                             modes = ["default", "name", "image", "state"]
                             self.sort_mode = modes[(modes.index(self.sort_mode) + 1) % len(modes)]
@@ -1524,12 +1841,19 @@ class ContainerDashboard:
                                     if command:
                                         self.exec_command_text = command
                                         self.record_exec_command(command)
-                                        self.set_status(f"Running command: {command}...")
-                                        self.draw_main_view()
-                                        output = self.client.exec_command(sel["id"], command)
-                                        self.exec_output_lines = output.split("\n")
-                                        self.exec_scroll_index = 0
-                                        self.view_mode = "exec"
+                                        default_interactive = "y" if command.strip() in ("sh", "bash", "ash", "zsh") else "n"
+                                        choice = self.prompt_user(f"Run command interactively? (y/n) [Default: {default_interactive}]: ").lower().strip()
+                                        if not choice:
+                                            choice = default_interactive
+                                        if choice in ("y", "yes"):
+                                            self.run_interactive_exec(sel["id"], sel["name"], command)
+                                        else:
+                                            self.set_status(f"Running command: {command}...")
+                                            self.draw_main_view()
+                                            output = self.client.exec_command(sel["id"], command)
+                                            self.exec_output_lines = output.split("\n")
+                                            self.exec_scroll_index = 0
+                                            self.view_mode = "exec"
                         elif key == "n" and self.current_tab == "containers":
                             if self.containers:
                                 sel = self.containers[self.selected_index]
@@ -1543,6 +1867,13 @@ class ContainerDashboard:
                                     else:
                                         self.set_status(f"Rename failed: {msg}")
                                     self.refresh_data()
+                        elif key == "x" and self.current_tab in ("containers", "compose"):
+                            sel = self.current_selected_container()
+                            if sel:
+                                self.set_status(f"Generating Compose snippet for {sel['name']}...")
+                                self.draw_main_view()
+                                self.compose_snippet_lines = []
+                                self.view_mode = "compose_snippet"
                         elif key == "r" and self.current_tab in ("containers", "compose"):
                             # Attempt to reconnect daemon or restart container
                             if not self.is_daemon_running_cached(force=True):
@@ -1600,6 +1931,45 @@ class ContainerDashboard:
                                     else:
                                         self.set_status(f"Failed to start container {sel['name']}.")
                                 self.refresh_data()
+                        elif key == "u" and self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                            row = self.compose_rows[self.selected_compose_index]
+                            confirm = self.prompt_user(f"Run up with --build on project '{row['project']}'? (y/n/c): ").lower().strip()
+                            if confirm in ("y", "yes"):
+                                self.set_status(f"Starting compose project '{row['project']}' with --build...")
+                                self.draw_main_view()
+                                success, msg = self.client.run_compose_cmd(row["project"], row.get("config_file", ""), "up-build")
+                                self.set_status(msg)
+                                self.refresh_data()
+                            elif confirm in ("n", "no"):
+                                self.set_status(f"Starting compose project '{row['project']}'...")
+                                self.draw_main_view()
+                                success, msg = self.client.run_compose_cmd(row["project"], row.get("config_file", ""), "up")
+                                self.set_status(msg)
+                                self.refresh_data()
+                            else:
+                                self.set_status("Compose up canceled.")
+                        elif key == "d" and self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                            row = self.compose_rows[self.selected_compose_index]
+                            confirm = self.prompt_user(f"Down compose project '{row['project']}'? (y/n): ").lower().strip()
+                            if confirm in ("y", "yes"):
+                                self.set_status(f"Downing compose project '{row['project']}'...")
+                                self.draw_main_view()
+                                success, msg = self.client.run_compose_cmd(row["project"], row.get("config_file", ""), "down")
+                                self.set_status(msg)
+                                self.refresh_data()
+                            else:
+                                self.set_status("Compose down canceled.")
+                        elif key == "b" and self.current_tab == "compose" and self.compose_rows and self.compose_rows[self.selected_compose_index].get("type") == "project":
+                            row = self.compose_rows[self.selected_compose_index]
+                            confirm = self.prompt_user(f"Build compose project '{row['project']}'? (y/n): ").lower().strip()
+                            if confirm in ("y", "yes"):
+                                self.set_status(f"Building compose project '{row['project']}'...")
+                                self.draw_main_view()
+                                success, msg = self.client.run_compose_cmd(row["project"], row.get("config_file", ""), "build")
+                                self.set_status(msg)
+                                self.refresh_data()
+                            else:
+                                self.set_status("Compose build canceled.")
                         elif key == "d" and self.current_tab == "images":
                             if self.images:
                                 sel_img = self.images[self.selected_image_index]
@@ -1653,6 +2023,7 @@ class ContainerDashboard:
                     # Small sleep to prevent high CPU usage
                     time.sleep(0.08)
         finally:
+            self.stop_log_stream()
             self.stop_refresh_worker()
             self.disable_mouse_tracking()
             print(RESET)

@@ -9,6 +9,18 @@ All notable changes to DockTUI are documented here.
 - Parsing and display of active `DOCKER_HOST` configuration in the dashboard header.
 - Warning alert on Contexts tab when `DOCKER_HOST` overrides context switching.
 - Key binding `U` in Contexts tab to switch active Docker contexts (when `DOCKER_HOST` is not active).
+- Color theme presets (Dark, Light, High-Contrast) switchable via CLI option `--theme` or hotkey `M`.
+- Support for configuration files loaded from `~/.config/docktui/config.json` or `~/.docktui.json` to customize default parameters.
+- Text search and filtering (`/` / `C` keys) support across all tabs (Images, Volumes, Networks, Contexts).
+- High-resource warning alerts (CPU/Memory bar color changes and alarm badge indicators when usage >= 80%).
+- Display of container IP addresses, gateways, and MAC addresses inside the Details view.
+- Deletion of Docker networks from the Networks tab via `D` hotkey.
+- Fixed keypress uppercase casing support for Unix/macOS input prompts.
+- Support switching directly to the Contexts tab via numeric key `6`.
+- Interactive terminal execution sessions (`docker exec -it` via temporary standard input/output restoration).
+- Real-time streaming logs (`docker logs -f` using background thread stream readers).
+- Extended Compose lifecycle actions (up, down, build, and up --build) directly from the Compose tab.
+- Reverse-engineering generator (exporting selected container to a `docker-compose.yml` snippet).
 
 ## [1.1.0] - 2026-06-04
 

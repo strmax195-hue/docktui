@@ -77,8 +77,31 @@ Useful options:
 docktui --version
 docktui --refresh-interval 5
 docktui --docker-timeout 15
+docktui --theme light
 docktui --host ssh://user@remote-host
 docktui -H tcp://192.168.1.100:2375
+```
+
+### Configuration File
+
+DockTUI can load defaults from a JSON configuration file located at `~/.config/docktui/config.json` (or `~/.docktui.json`). Any options specified via command-line flags will override the configuration file defaults.
+
+Example configuration:
+
+```json
+{
+  "refresh_interval": 3.0,
+  "docker_timeout": 15.0,
+  "theme": "dark",
+  "log_tail_limit": 100,
+  "exec_presets": [
+    "sh",
+    "bash",
+    "env",
+    "ps aux",
+    "df -h"
+  ]
+}
 ```
 
 ### Remote Docker Daemons (SSH/TCP)
@@ -108,21 +131,27 @@ When `DOCKER_HOST` is active (either set via `--host` / `-H` CLI options or the 
 - **`Tab` or `1`-`6`**: Switch between **Containers**, **Compose**, **Images**, **Volumes**, **Networks**, and **Contexts** tabs.
 - **`↑` / `↓` (Arrow Keys) or Mouse Scroll Wheel**: Navigate list items and scroll text logs.
 - **`G`**: Force refresh data.
+- **`/`**: Filter list items by name/attributes on the active tab (works on Containers, Compose, Images, Volumes, Networks, and Contexts tabs).
+- **`C`**: Clear the active text search filter on the current tab.
+- **`M`**: Cycle between **Dark**, **Light**, and **High-Contrast** theme presets.
 - **`?`**: Open the in-app keyboard help screen.
 - **`Q`**: Exit DockTUI.
 
 #### Containers & Compose Tabs
 - **`S`**: Start or Stop the selected container.
 - **`S` on a Compose project row**: Start or stop all containers in that project group.
-- **`R`**: Restart the selected container or selected Compose project group.
-- **`L`**: Open fullscreen interactive **Logs View** (opens aggregated logs when a Compose project row is selected).
+- **`R`**: Restart the selected container.
+- **`R` on a Compose project row**: Restart all containers in that project group.
+- **`L`**: Open fullscreen **Logs View** (supports real-time streaming using background threads, opens aggregated project logs when a Compose project row is selected).
 - **`V`**: Open readable **Details View**.
 - **`I`**: Open fullscreen interactive **Inspect View**.
 - **`T`**: Open processes running inside the container (**Top View**).
-- **`E`**: Execute a shell command inside the running container (**Exec View**).
+- **`E`**: Execute a shell command inside the running container (prompts to run interactively via `docker exec -it` or in background **Exec View**).
+- **`X`**: Generate and view a `docker-compose.yml` snippet representing the container configuration (**Compose Snippet View**).
+- **`U` on a Compose project row**: Run `docker compose up -d` (prompts to optionally include `--build`).
+- **`D` on a Compose project row**: Run `docker compose down`.
+- **`B` on a Compose project row**: Run `docker compose build`.
 - **`N`**: Rename the selected container.
-- **`/`**: Filter the containers grid by name/image.
-- **`C`**: Clear the active container filter.
 - **`O`**: Cycle sort mode.
 - **`Y`**: Cycle state filter.
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
@@ -153,7 +182,7 @@ When `DOCKER_HOST` is active (either set via `--host` / `-H` CLI options or the 
   - `O`: Export the current logs buffer to a local file.
   - `C`: Clear active log filters.
   - `+` / `-`: Increase/decrease log line retrieval limits.
-- **Inspect, Details, Top Views**:
+- **Inspect, Details, Top, Compose Snippet Views**:
   - `O`: Export the current view buffer to a local file.
 - **Exec View Features**:
   - `R`: Re-run the current command.

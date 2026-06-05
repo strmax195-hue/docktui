@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import subprocess
 import os
+import json
 from docktui.docker_client import DockerClient
 
 class TestDockerClient(unittest.TestCase):
@@ -256,7 +257,13 @@ class TestDockerClient(unittest.TestCase):
                 "HostConfig": {"RestartPolicy": {"Name": "unless-stopped"}},
                 "NetworkSettings": {
                     "Ports": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]},
-                    "Networks": {"myapp_default": {}}
+                    "Networks": {
+                        "myapp_default": {
+                            "IPAddress": "172.18.0.2",
+                            "Gateway": "172.18.0.1",
+                            "MacAddress": "02:42:ac:12:00:02"
+                        }
+                    }
                 },
                 "Mounts": [{"Source": "/host", "Destination": "/app", "Mode": "rw"}]
             }]'''
@@ -268,6 +275,9 @@ class TestDockerClient(unittest.TestCase):
         self.assertEqual(details["image"], "nginx:alpine")
         self.assertIn("8080", details["ports"])
         self.assertIn("myapp_default", details["networks"])
+        self.assertIn("172.18.0.2", details["ip_details"])
+        self.assertIn("Gateway: 172.18.0.1", details["ip_details"])
+        self.assertIn("MAC: 02:42:ac:12:00:02", details["ip_details"])
 
     @patch("subprocess.run")
     def test_get_logs_reports_timeout(self, mock_run):
@@ -385,6 +395,75 @@ class TestDockerClient(unittest.TestCase):
         success, msg = self.client.remove_network("my-net")
         self.assertFalse(success)
         self.assertIn("Error: network in use", msg)
+
+    @patch("subprocess.run")
+    def test_run_compose_cmd(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="Started compose")
+        
+        success, msg = self.client.run_compose_cmd("myproject", "docker-compose.yml", "up")
+        self.assertTrue(success)
+        self.assertIn("Started compose", msg)
+        mock_run.assert_called_with(
+            ["docker", "-f", "docker-compose.yml", "compose", "up", "-d"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10.0
+        )
+
+        success, msg = self.client.run_compose_cmd("myproject", "", "down")
+        self.assertTrue(success)
+        mock_run.assert_called_with(
+            ["docker", "-p", "myproject", "compose", "down"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10.0
+        )
+
+    @patch("docktui.docker_client.DockerClient.inspect_container")
+    def test_generate_compose_snippet(self, mock_inspect):
+        self.client.docker_bin = "docker"
+        inspect_data = [{
+            "Name": "/test-container",
+            "Config": {
+                "Image": "nginx:alpine",
+                "Env": ["PATH=/usr/local/sbin", "MY_VAR=hello"],
+                "RestartPolicy": {"Name": "unless-stopped"},
+                "Labels": {"my.label": "value", "com.docker.compose.project": "ignored"}
+            },
+            "HostConfig": {
+                "RestartPolicy": {"Name": "unless-stopped"},
+                "PortBindings": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]},
+                "Binds": ["/host/path:/container/path:ro"]
+            },
+            "NetworkSettings": {
+                "Networks": {"my-network": {}}
+            }
+        }]
+        mock_inspect.return_value = json.dumps(inspect_data)
+        
+        snippet = self.client.generate_compose_snippet("container-id")
+        
+        self.assertIn("version: '3.8'", snippet)
+        self.assertIn("services:", snippet)
+        self.assertIn("test_container:", snippet)
+        self.assertIn("image: nginx:alpine", snippet)
+        self.assertIn("container_name: test-container", snippet)
+        self.assertIn("restart: unless-stopped", snippet)
+        self.assertIn("ports:", snippet)
+        self.assertIn("- \"8080:80/tcp\"", snippet)
+        self.assertIn("volumes:", snippet)
+        self.assertIn("- /host/path:/container/path:ro", snippet)
+        self.assertIn("environment:", snippet)
+        self.assertIn("- MY_VAR=hello", snippet)
+        self.assertNotIn("- PATH=", snippet)
+        self.assertIn("networks:", snippet)
+        self.assertIn("- my-network", snippet)
+        self.assertIn("labels:", snippet)
+        self.assertIn("- \"my.label=value\"", snippet)
+        self.assertNotIn("com.docker.compose", snippet)
 
 if __name__ == "__main__":
     unittest.main()
