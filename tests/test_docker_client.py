@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import subprocess
+import os
 from docktui.docker_client import DockerClient
 
 class TestDockerClient(unittest.TestCase):
@@ -298,6 +299,77 @@ class TestDockerClient(unittest.TestCase):
         output = self.client.get_compose_project_logs("myproject")
 
         self.assertIn("Timed out reading Compose logs", output)
+
+    def test_docker_host_properties_and_parsing(self):
+        # Backup original DOCKER_HOST
+        orig_env = os.environ.get("DOCKER_HOST")
+        try:
+            # Test constructor sets env
+            client = DockerClient(host="ssh://testuser@192.168.1.50:2222")
+            self.assertEqual(client.docker_host, "ssh://testuser@192.168.1.50:2222")
+            self.assertEqual(os.environ.get("DOCKER_HOST"), "ssh://testuser@192.168.1.50:2222")
+
+            # Test parsing SSH with port
+            parsed = client.parse_docker_host()
+            self.assertIsNotNone(parsed)
+            self.assertEqual(parsed["protocol"], "ssh")
+            self.assertEqual(parsed["user"], "testuser")
+            self.assertEqual(parsed["host"], "192.168.1.50")
+            self.assertEqual(parsed["port"], "2222")
+            self.assertEqual(parsed["display"], "ssh://testuser@192.168.1.50:2222")
+
+            # Test parsing SSH without port
+            client.host = None
+            os.environ["DOCKER_HOST"] = "ssh://anotheruser@remotehost"
+            parsed = client.parse_docker_host()
+            self.assertEqual(parsed["protocol"], "ssh")
+            self.assertEqual(parsed["user"], "anotheruser")
+            self.assertEqual(parsed["host"], "remotehost")
+            self.assertEqual(parsed["port"], "")
+            self.assertEqual(parsed["display"], "ssh://anotheruser@remotehost")
+
+            # Test parsing TCP
+            os.environ["DOCKER_HOST"] = "tcp://1.2.3.4:2376"
+            parsed = client.parse_docker_host()
+            self.assertEqual(parsed["protocol"], "tcp")
+            self.assertEqual(parsed["user"], "")
+            self.assertEqual(parsed["host"], "1.2.3.4")
+            self.assertEqual(parsed["port"], "2376")
+            self.assertEqual(parsed["display"], "tcp://1.2.3.4:2376")
+
+            # Test parsing unix socket
+            os.environ["DOCKER_HOST"] = "unix:///var/run/docker.sock"
+            parsed = client.parse_docker_host()
+            self.assertEqual(parsed["protocol"], "unix")
+            self.assertEqual(parsed["host"], "/var/run/docker.sock")
+            self.assertEqual(parsed["display"], "unix:///var/run/docker.sock")
+
+            # Test parsing default TCP without protocol scheme
+            os.environ["DOCKER_HOST"] = "localhost:2375"
+            parsed = client.parse_docker_host()
+            self.assertEqual(parsed["protocol"], "tcp")
+            self.assertEqual(parsed["host"], "localhost")
+            self.assertEqual(parsed["port"], "2375")
+            self.assertEqual(parsed["display"], "tcp://localhost:2375")
+
+            # Test parsing IPv6
+            os.environ["DOCKER_HOST"] = "tcp://[::1]:2376"
+            parsed = client.parse_docker_host()
+            self.assertEqual(parsed["protocol"], "tcp")
+            self.assertEqual(parsed["host"], "[::1]")
+            self.assertEqual(parsed["port"], "2376")
+            self.assertEqual(parsed["display"], "tcp://[::1]:2376")
+
+            # Test parsing None/Empty
+            os.environ.pop("DOCKER_HOST", None)
+            self.assertIsNone(client.parse_docker_host())
+
+        finally:
+            # Restore environment
+            if orig_env is not None:
+                os.environ["DOCKER_HOST"] = orig_env
+            else:
+                os.environ.pop("DOCKER_HOST", None)
 
 if __name__ == "__main__":
     unittest.main()

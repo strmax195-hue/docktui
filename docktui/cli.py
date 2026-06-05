@@ -24,11 +24,17 @@ def main():
         default=10.0,
         help="Timeout for Docker CLI commands in seconds. Default: 10.0",
     )
+    parser.add_argument(
+        "--host", "-H",
+        type=str,
+        help="Docker daemon socket/host to connect to (e.g. ssh://user@host, tcp://192.168.1.100:2375). Overrides DOCKER_HOST env var.",
+    )
     args = parser.parse_args()
 
     dashboard = ContainerDashboard(
         refresh_interval=max(0.5, args.refresh_interval),
         docker_timeout=max(1.0, args.docker_timeout),
+        docker_host=args.host,
     )
     try:
         dashboard.run()

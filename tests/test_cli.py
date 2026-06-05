@@ -13,7 +13,7 @@ class TestCli(unittest.TestCase):
     def test_cli_passes_runtime_options_to_dashboard(self, mock_dashboard):
         main()
 
-        mock_dashboard.assert_called_once_with(refresh_interval=3.5, docker_timeout=12.0)
+        mock_dashboard.assert_called_once_with(refresh_interval=3.5, docker_timeout=12.0, docker_host=None)
         mock_dashboard.return_value.run.assert_called_once()
 
     @patch("sys.argv", ["docktui", "--version"])
@@ -31,7 +31,14 @@ class TestCli(unittest.TestCase):
     def test_cli_clamps_low_runtime_options(self, mock_dashboard):
         main()
 
-        mock_dashboard.assert_called_once_with(refresh_interval=0.5, docker_timeout=1.0)
+        mock_dashboard.assert_called_once_with(refresh_interval=0.5, docker_timeout=1.0, docker_host=None)
+
+    @patch("docktui.cli.ContainerDashboard")
+    @patch("sys.argv", ["docktui", "--host", "ssh://user@host"])
+    def test_cli_passes_host_option(self, mock_dashboard):
+        main()
+
+        mock_dashboard.assert_called_once_with(refresh_interval=2.0, docker_timeout=10.0, docker_host="ssh://user@host")
 
 
 if __name__ == "__main__":

@@ -77,7 +77,30 @@ Useful options:
 docktui --version
 docktui --refresh-interval 5
 docktui --docker-timeout 15
+docktui --host ssh://user@remote-host
+docktui -H tcp://192.168.1.100:2375
 ```
+
+### Remote Docker Daemons (SSH/TCP)
+
+DockTUI supports connecting to remote Docker daemons via the standard `DOCKER_HOST` environment variable, or by passing the `--host` (or `-H`) command-line flag:
+
+```bash
+# Connect via SSH
+docktui -H ssh://user@remote-host
+
+# Connect via TCP
+docktui -H tcp://192.168.1.100:2375
+```
+
+#### SSH Connection Requirements
+When connecting via SSH, DockTUI executes commands non-interactively. This means that:
+- Passwordless SSH authentication must be configured (e.g. using SSH public key authentication with keys loaded in your SSH agent).
+- The remote host key must already be present in your local `known_hosts` file (otherwise, SSH prompts to confirm the host fingerprint and hangs).
+
+#### Contexts Tab Overrides
+When `DOCKER_HOST` is active (either set via `--host` / `-H` CLI options or the `DOCKER_HOST` environment variable), Docker contexts are overridden. In the **Contexts** tab, DockTUI will display a warning, and context switching will be disabled since `DOCKER_HOST` forces all CLI operations to target the specified endpoint.
+
 
 ### Hotkeys & Keyboard Navigation
 

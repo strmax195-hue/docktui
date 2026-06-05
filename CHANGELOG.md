@@ -2,6 +2,14 @@
 
 All notable changes to DockTUI are documented here.
 
+## [1.2.0] - 2026-06-05
+
+### Added
+- Remote Docker daemon support via `--host`/`-H` CLI option and `DOCKER_HOST` environment variable.
+- Parsing and display of active `DOCKER_HOST` configuration in the dashboard header.
+- Warning alert on Contexts tab when `DOCKER_HOST` overrides context switching.
+- Key binding `U` in Contexts tab to switch active Docker contexts (when `DOCKER_HOST` is not active).
+
 ## [1.1.0] - 2026-06-04
 
 ### Added

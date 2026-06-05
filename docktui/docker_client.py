@@ -2,14 +2,91 @@ import subprocess
 import shutil
 import shlex
 import json
+import os
 from typing import Dict, List, Optional, Tuple
 
 class DockerClient:
-    """Interacts with the local Docker daemon via the Docker CLI command line."""
+    """Interacts with the Docker daemon via the Docker CLI command line."""
 
-    def __init__(self, timeout: float = 10.0):
+    def __init__(self, timeout: float = 10.0, host: Optional[str] = None):
         self.docker_bin = shutil.which("docker")
         self.timeout = timeout
+        if host:
+            os.environ["DOCKER_HOST"] = host
+
+    @property
+    def docker_host(self) -> Optional[str]:
+        """Returns the active DOCKER_HOST environment variable or specified host."""
+        return os.environ.get("DOCKER_HOST")
+
+    def parse_docker_host(self) -> Optional[Dict[str, str]]:
+        """
+        Parses DOCKER_HOST value into protocol, user, host, port, and display string.
+        Returns None if DOCKER_HOST is not set or empty.
+        """
+        host_str = self.docker_host
+        if not host_str:
+            return None
+
+        parsed = {
+            "original": host_str,
+            "protocol": "",
+            "host": "",
+            "user": "",
+            "port": "",
+            "display": ""
+        }
+
+        temp = host_str.strip()
+        if "://" in temp:
+            proto, rest = temp.split("://", 1)
+            parsed["protocol"] = proto.lower()
+        else:
+            # Docker default behavior without scheme
+            if temp.startswith("/") or temp.startswith("\\\\"):
+                parsed["protocol"] = "unix" if temp.startswith("/") else "npipe"
+                rest = temp
+            else:
+                parsed["protocol"] = "tcp"
+                rest = temp
+
+        if parsed["protocol"] in ("unix", "npipe"):
+            parsed["host"] = rest
+            parsed["display"] = f"{parsed['protocol']}://{rest}"
+        elif parsed["protocol"] in ("ssh", "tcp"):
+            user = ""
+            host_port = rest
+            if parsed["protocol"] == "ssh" and "@" in rest:
+                user, host_port = rest.rsplit("@", 1)
+                parsed["user"] = user
+
+            # Parse host and port. Port is optional.
+            # IPv6 addresses can be enclosed in square brackets, e.g. [::1]:2375 or [::1]
+            if host_port.startswith("["):
+                if "]" in host_port:
+                    parts = host_port.split("]", 1)
+                    parsed["host"] = parts[0] + "]"
+                    if parts[1].startswith(":"):
+                        parsed["port"] = parts[1][1:]
+                else:
+                    parsed["host"] = host_port
+            else:
+                if ":" in host_port:
+                    parts = host_port.rsplit(":", 1)
+                    parsed["host"] = parts[0]
+                    parsed["port"] = parts[1]
+                else:
+                    parsed["host"] = host_port
+
+            display_parts = []
+            if parsed["user"]:
+                display_parts.append(f"{parsed['user']}@")
+            display_parts.append(parsed["host"])
+            if parsed["port"]:
+                display_parts.append(f":{parsed['port']}")
+            parsed["display"] = f"{parsed['protocol']}://{''.join(display_parts)}"
+
+        return parsed
 
     def _run(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
         """Runs Docker CLI commands with a default timeout."""

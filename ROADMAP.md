@@ -16,6 +16,7 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - Scroll-wheel mouse navigation support across TUI views.
 - Clean export of logs, inspect JSON, details, and top views to files.
 - Beautiful empty state screens with CLI tips for all tabs.
+- Support for remote Docker daemons via SSH/TCP (proper `DOCKER_HOST` parsing and display).
 
 ## Near term
 
@@ -31,7 +32,6 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - Extended Compose lifecycle actions (e.g. build, down, up --build directly from Compose tab).
 - Container IP address and subnet display within the Details view.
 - Reverse-engineering generator (exporting selected container to a `docker-compose.yml` snippet).
-- Support for remote Docker daemons via SSH/TCP (proper `DOCKER_HOST` parsing).
 
 
 

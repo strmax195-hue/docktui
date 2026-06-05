@@ -111,8 +111,8 @@ except ImportError:
 class ContainerDashboard:
     """The main TUI rendering and interaction loop."""
 
-    def __init__(self, refresh_interval: float = 2.0, docker_timeout: float = 10.0):
-        self.client = DockerClient(timeout=docker_timeout)
+    def __init__(self, refresh_interval: float = 2.0, docker_timeout: float = 10.0, docker_host: Optional[str] = None):
+        self.client = DockerClient(timeout=docker_timeout, host=docker_host)
         self.refresh_interval = refresh_interval
         self.containers: List[Dict[str, str]] = []
         self.stats: Dict[str, Dict[str, str]] = {}
@@ -630,7 +630,12 @@ class ContainerDashboard:
         print("\033[2J\033[H", end="")
 
         # Title block
-        context_text = f" [{self.current_context}]" if self.current_context else ""
+        if self.client.docker_host:
+            parsed = self.client.parse_docker_host()
+            host_display = parsed["display"] if parsed else self.client.docker_host
+            context_text = f" [{self.current_context} ({host_display})]" if self.current_context else f" [{host_display}]"
+        else:
+            context_text = f" [{self.current_context}]" if self.current_context else ""
         title_text = f"DockTUI Container Dashboard{context_text}"
         padding = (width - 2 - len(title_text)) // 2
         title_line = "║" + " " * padding + title_text + " " * (width - 2 - len(title_text) - padding) + "║"
@@ -819,6 +824,9 @@ class ContainerDashboard:
                 print("─" * (width - 1))
 
         elif self.current_tab == "contexts":
+            if self.client.docker_host:
+                print(f"{YELLOW}{BOLD}Note: DOCKER_HOST is active. Context switching is bypassed (DOCKER_HOST overrides context).{RESET}")
+                print("─" * (width - 1))
             if not self.contexts:
                 self.draw_empty_state("contexts", width)
             else:
@@ -1618,6 +1626,16 @@ class ContainerDashboard:
                                     self.refresh_data()
                                 else:
                                     self.set_status("Volume deletion canceled.")
+                        elif key == "u" and self.current_tab == "contexts":
+                            if self.client.docker_host:
+                                self.set_status("Cannot switch context: DOCKER_HOST is active and overrides context.")
+                            elif self.contexts:
+                                sel_ctx = self.contexts[self.selected_context_index]
+                                self.set_status(f"Switching Docker context to {sel_ctx['name']}...")
+                                self.draw_main_view()
+                                success, msg = self.client.use_context(sel_ctx["name"])
+                                self.set_status(msg)
+                                self.refresh_data()
 
                     # Small sleep to prevent high CPU usage
                     time.sleep(0.08)
