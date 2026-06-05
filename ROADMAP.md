@@ -30,11 +30,16 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 
 ## Near term
 
-- (All near-term items have been delivered!)
+- **Interactive Configuration Editor**: An in-app settings view (or editor) to customize refresh intervals, log limits, and add/edit exec presets, saving them directly to `~/.config/docktui/config.json`.
+- **Registry Search & Image Pulling**: Add a dialog to search for images on Docker Hub (or configured registries) and pull them directly from the Images tab.
+- **Multi-Host Endpoint Switcher**: Expand the Contexts tab to define, manage, and switch between multiple remote Docker daemon connections (SSH/TCP) dynamically.
 
 ## Later
 
-- (All planned later-stage items have been delivered!)
+- **Dynamic Resource Limits Editing**: Support modifying container CPU and memory allocations dynamically (wrapping `docker update`) from the Details view.
+- **Container Cloning & Duplication**: Easily clone an existing container's configuration to spawn a new replica with customized ports or names.
+- **Volume Directory Explorer**: Browse files and directories inside local volumes and container mounts directly from a nested Files explorer.
+- **Log Highlighting & Regex Filtering**: Support custom keyword highlights and regex filters inside the Log Viewer.
 
 ## Feedback wanted
 
