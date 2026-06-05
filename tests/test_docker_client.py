@@ -371,6 +371,21 @@ class TestDockerClient(unittest.TestCase):
             else:
                 os.environ.pop("DOCKER_HOST", None)
 
+    @patch("subprocess.run")
+    def test_remove_network(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        
+        success, msg = self.client.remove_network("my-net")
+        self.assertTrue(success)
+        self.assertIn("Successfully removed network my-net", msg)
+
+        # Test failure case
+        mock_run.return_value = MagicMock(returncode=1, stderr="Error: network in use")
+        success, msg = self.client.remove_network("my-net")
+        self.assertFalse(success)
+        self.assertIn("Error: network in use", msg)
+
 if __name__ == "__main__":
     unittest.main()
 

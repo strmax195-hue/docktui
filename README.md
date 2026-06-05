@@ -135,6 +135,9 @@ When `DOCKER_HOST` is active (either set via `--host` / `-H` CLI options or the 
 - **`D`**: Delete the selected volume (asks for confirmation).
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
 
+#### Networks Tab
+- **`D`**: Delete the selected network (asks for confirmation).
+
 #### Contexts Tab
 - **`U`**: Switch active Docker context to the selected context.
 

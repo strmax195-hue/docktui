@@ -673,3 +673,23 @@ class DockerClient:
             return f"Timed out executing command after {self.timeout:g} seconds."
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    def remove_network(self, network_name: str) -> Tuple[bool, str]:
+        """Removes a Docker network."""
+        if not self.is_docker_installed():
+            return False, "Docker not installed."
+        try:
+            res = self._run(
+                [self.docker_bin, "network", "rm", network_name],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8"
+            )
+            if res.returncode == 0:
+                return True, f"Successfully removed network {network_name}."
+            return False, res.stderr or f"Failed to remove network {network_name}."
+        except subprocess.TimeoutExpired:
+            return False, f"Timed out removing network after {self.timeout:g} seconds."
+        except Exception as e:
+            return False, f"Error removing network: {str(e)}"

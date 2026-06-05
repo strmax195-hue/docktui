@@ -102,7 +102,7 @@ except ImportError:
                     return "enter"
                 if ch in ("\x7f", "\b"):
                     return "backspace"
-                return ch.lower()
+                return ch
             return None
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -860,6 +860,8 @@ class ContainerDashboard:
             print(f"{CYAN}[D] Delete Image | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
         elif self.current_tab == "volumes":
             print(f"{CYAN}[D] Delete Volume | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
+        elif self.current_tab == "networks":
+            print(f"{CYAN}[D] Delete Network | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
         elif self.current_tab == "contexts":
             print(f"{CYAN}[U] Use Context | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}")
         else:
@@ -956,6 +958,7 @@ class ContainerDashboard:
         print(f"{BOLD}Images and cleanup{RESET}")
         print("  D            Delete selected image")
         print("  D            Delete selected volume on the Volumes tab")
+        print("  D            Delete selected network on the Networks tab")
         print("  P            Open Docker disk usage")
         print("  X / I / V / A Run system, image, volume, or full prune")
         print("\n" + "═" * (width - 1))
@@ -1626,6 +1629,16 @@ class ContainerDashboard:
                                     self.refresh_data()
                                 else:
                                     self.set_status("Volume deletion canceled.")
+                        elif key == "d" and self.current_tab == "networks":
+                            if self.networks:
+                                network = self.networks[self.selected_network_index]
+                                confirm = self.prompt_user(f"Delete network {network['name']} ({network['driver']})? (y/n): ")
+                                if confirm.lower() in ("y", "yes"):
+                                    success, msg = self.client.remove_network(network["name"])
+                                    self.set_status(msg if success else f"Network delete failed: {msg}")
+                                    self.refresh_data()
+                                else:
+                                    self.set_status("Network deletion canceled.")
                         elif key == "u" and self.current_tab == "contexts":
                             if self.client.docker_host:
                                 self.set_status("Cannot switch context: DOCKER_HOST is active and overrides context.")
