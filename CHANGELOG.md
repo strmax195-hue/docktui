@@ -2,6 +2,28 @@
 
 All notable changes to DockTUI are documented here.
 
+## [1.3.0] - 2026-06-07
+
+### Added
+- **Interactive settings editor** (`Shift+S`): edit refresh interval, Docker timeout, theme, log tail/max, CPU alert threshold, exec history cap, exec presets, and log highlight patterns from inside the dashboard. Press `S` to save the changes back to the config file; `Esc` to discard.
+- **Registry search and image pulling** (`F` on Images tab): search Docker Hub and pull images directly from the Images tab with a live pull-progress view (cancellable, streamed via the new `LineStreamer`).
+- **Multi-host endpoint switcher**: register named remote endpoints in the config file (`endpoints`) and activate them with the `N` hotkey on the Contexts tab, or by selecting one from the prompt. Activation updates DockTUI's per-instance `DOCKER_HOST` without mutating the shell environment.
+- **Dynamic resource limits** (`W` on Containers/Compose tabs): edit live CPU and memory allocations for a running container using a small modal that wraps `docker update`.
+- **Log highlighting and regex filtering** (`H` in Logs view): toggle highlighting based on patterns configured via `log_highlights` (each entry is `{label, pattern}`) with regex support and case-insensitive matching.
+- **Container cloning** (`Shift+C` on Containers/Compose tabs): open a clone dialog that pre-fills the image, name, and ports so you can spawn a copy of an existing container with `docker run`.
+- **Volume file browser** (`Shift+F` on Volumes tab): drill into a volume's contents via a lightweight in-app directory explorer (entry list, `Enter` to descend, `Backspace` to ascend, `Esc` to return).
+
+### Changed
+- **Per-instance `DOCKER_HOST`**: `DockerClient` no longer mutates `os.environ["DOCKER_HOST"]` when you set the host programmatically. The legacy constructor behavior is preserved for backward compatibility, but the new `set_host()` / `host` property flow is side-effect free.
+- **Refactored codebase**: split the dashboard into focused modules — `config.py`, `constants.py`, `enums.py`, `styles.py`, `screen.py`, `keymap.py`, `dialogs.py`, `log_stream.py` — to replace the legacy monolithic `tui.py`. The new layout keeps zero runtime dependencies while reducing duplication and making it easy to extend with new views.
+- **`docker_client.py` helper extraction**: all subprocess calls now go through `_capture` / `_run_capture` / `_bool` helpers, removing hand-rolled parsing paths and yielding consistent return values for unit testing.
+- **Python support**: dropped Python 3.7 (EOL); now supports 3.8–3.13. CI matrix updated accordingly.
+- **Linting**: ruff is now part of the dev toolchain (`py -m ruff check .`) with a dedicated `lint` job in CI.
+
+### Fixed
+- Constructor copy/paste bug in the legacy `__init__` flow (container filter was being assigned twice) — resolved during the refactor.
+- Stale imports and unused `Optional` / `Iterable` / `List` typing that were no longer needed in the new module layout.
+
 ## [1.2.0] - 2026-06-05
 
 ### Added

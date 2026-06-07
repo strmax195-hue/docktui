@@ -29,6 +29,15 @@ MANIFEST
 .nox/
 .coverage
 .htmlcov
+.ruff_cache/
+
+# DockTUI runtime artifacts
+logs.txt
+test_logs_*.txt
+test_inspect_*.json
+test_top_*.txt
+test_compose_*.yml
+*.docktui-export
 
 # Environments
 .env

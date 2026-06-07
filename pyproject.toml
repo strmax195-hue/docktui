@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docktui"
-version = "1.2.0"
+version = "1.3.0"
 
 description = "A lightweight, zero-dependency TUI dashboard for managing Docker containers"
 readme = "README.md"
@@ -15,12 +15,12 @@ license = { text = "MIT" }
 keywords = ["docker", "tui", "terminal", "containers", "monitoring", "devops"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Environment :: Console",
@@ -30,13 +30,14 @@ classifiers = [
     "Topic :: Software Development :: Build Tools",
     "Topic :: System :: Monitoring"
 ]
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 dependencies = []
 
 [project.optional-dependencies]
 dev = [
     "build>=1.2.0",
-    "twine>=5.0.0"
+    "twine>=5.0.0",
+    "ruff>=0.5.0",
 ]
 
 [project.urls]
@@ -51,3 +52,16 @@ docktui = "docktui.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["docktui*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",  # line length is enforced by the formatter; long lines are common in view code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B", "E402"]

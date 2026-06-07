@@ -27,19 +27,31 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - Real-time streaming logs (`docker logs -f` via background threads).
 - Extended Compose lifecycle actions (build, down, up --build directly from Compose tab).
 - Reverse-engineering generator (exporting selected container to a `docker-compose.yml` snippet).
+- **Interactive Configuration Editor** (`Shift+S`): in-app settings view that edits refresh interval, log limits, theme, exec presets, log highlight patterns, and writes them back to the config file.
+- **Registry Search & Image Pulling** (`F` on Images tab): Docker Hub search with live pull progress and cancellation.
+- **Multi-Host Endpoint Switcher**: persistent `endpoints` list in the config file and an in-app activator (Contexts tab → `N` or a name picker) that updates DockTUI's per-instance `DOCKER_HOST` without mutating the shell environment.
+- **Dynamic Resource Limits Editing** (`W` on Containers/Compose): edit live CPU and memory allocations via a small modal that wraps `docker update`.
+- **Container Cloning & Duplication** (`Shift+C` on Containers/Compose): open a clone dialog pre-filled with image, name, and ports to spawn a copy of an existing container.
+- **Volume Directory Explorer** (`Shift+F` on Volumes): in-app directory browser for Docker volumes.
+- **Log Highlighting & Regex Filtering** (`H` in Logs view): regex-based highlight patterns configured via the config file and toggleable from the keyboard.
 
 ## Near term
 
-- **Interactive Configuration Editor**: An in-app settings view (or editor) to customize refresh intervals, log limits, and add/edit exec presets, saving them directly to `~/.config/docktui/config.json`.
-- **Registry Search & Image Pulling**: Add a dialog to search for images on Docker Hub (or configured registries) and pull them directly from the Images tab.
-- **Multi-Host Endpoint Switcher**: Expand the Contexts tab to define, manage, and switch between multiple remote Docker daemon connections (SSH/TCP) dynamically.
+- Compose snippet export to file (reuse the existing `O` export pattern).
+- Save logs/inspect/diff views via a single `O` key already shipped; expose the same export from the new Settings/Search/Pull/Files views.
+- Bulk container start/stop on the Containers tab (operate on the visible filter).
+- Persist last-used `log_highlights` and `exec_presets` in addition to the static defaults.
 
 ## Later
 
-- **Dynamic Resource Limits Editing**: Support modifying container CPU and memory allocations dynamically (wrapping `docker update`) from the Details view.
-- **Container Cloning & Duplication**: Easily clone an existing container's configuration to spawn a new replica with customized ports or names.
-- **Volume Directory Explorer**: Browse files and directories inside local volumes and container mounts directly from a nested Files explorer.
-- **Log Highlighting & Regex Filtering**: Support custom keyword highlights and regex filters inside the Log Viewer.
+- **Inline shell history search**: type-to-search through past exec commands on the Exec modal.
+- **Detachable dashboard panes**: let users split the screen to keep logs open while navigating containers.
+- **Configurable poll interval per resource type**: slower refresh for volumes/networks, faster for containers.
+- **Plugin-style hotkey overlays**: users can register custom hotkeys in the config file that run shell commands or shell scripts in the active container.
+
+## Feedback wanted
+
+Open an issue if a Docker workflow feels repetitive enough that DockTUI should make it one keypress.
 
 ## Feedback wanted
 

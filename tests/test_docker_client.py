@@ -1,9 +1,11 @@
-import unittest
-from unittest.mock import patch, MagicMock
-import subprocess
-import os
 import json
+import os
+import subprocess
+import unittest
+from unittest.mock import MagicMock, patch
+
 from docktui.docker_client import DockerClient
+
 
 class TestDockerClient(unittest.TestCase):
     def setUp(self):
@@ -23,7 +25,7 @@ class TestDockerClient(unittest.TestCase):
     def test_is_daemon_running(self, mock_run):
         # Setup docker_bin mock
         self.client.docker_bin = "docker"
-        
+
         # Test success
         mock_run.return_value = MagicMock(returncode=0)
         self.assertTrue(self.client.is_daemon_running())
@@ -37,7 +39,7 @@ class TestDockerClient(unittest.TestCase):
     @patch("subprocess.run")
     def test_list_containers(self, mock_run):
         self.client.docker_bin = "docker"
-        
+
         # Mock output of 'docker ps -a --format ...'
         mock_stdout = (
             "c123|web-app|running|Up 2 hours|nginx:alpine|"
@@ -45,10 +47,10 @@ class TestDockerClient(unittest.TestCase):
             "d456|db-dev|exited|Exited (0) 5m ago|postgres:15||5432->5432|2026-01-01\n"
         )
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
-        
+
         containers = self.client.list_containers()
         self.assertEqual(len(containers), 2)
-        
+
         self.assertEqual(containers[0]["id"], "c123")
         self.assertEqual(containers[0]["name"], "web-app")
         self.assertEqual(containers[0]["state"], "running")
@@ -65,11 +67,11 @@ class TestDockerClient(unittest.TestCase):
     @patch("subprocess.run")
     def test_get_container_stats(self, mock_run):
         self.client.docker_bin = "docker"
-        
+
         # Mock output of 'docker stats --no-stream ...' (now 5 columns with MemPerc)
         mock_stdout = "c123|1.25%|25.4MiB / 7.84GiB|0.32%|1.2kB / 0B\n"
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
-        
+
         stats = self.client.get_container_stats()
         self.assertIn("c123", stats)
         self.assertEqual(stats["c123"]["cpu"], "1.25%")
@@ -80,10 +82,10 @@ class TestDockerClient(unittest.TestCase):
     @patch("subprocess.run")
     def test_inspect_container(self, mock_run):
         self.client.docker_bin = "docker"
-        
+
         mock_stdout = '[{"Id": "c123", "Name": "/web-app"}]'
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
-        
+
         inspect_data = self.client.inspect_container("c123")
         self.assertEqual(inspect_data, mock_stdout)
 
@@ -92,7 +94,7 @@ class TestDockerClient(unittest.TestCase):
         self.client.docker_bin = "docker"
         mock_stdout = "TYPE            TOTAL           ACTIVE          SIZE            RECLAIMABLE\nImages          10              2               1.5GB           1.2GB (80%)"
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
-        
+
         disk_usage = self.client.get_disk_usage()
         self.assertEqual(disk_usage, mock_stdout)
 
@@ -101,7 +103,7 @@ class TestDockerClient(unittest.TestCase):
         self.client.docker_bin = "docker"
         mock_stdout = "Total reclaimed space: 500MB"
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
-        
+
         prune_res = self.client.prune_system()
         self.assertEqual(prune_res, mock_stdout)
 
@@ -158,7 +160,7 @@ class TestDockerClient(unittest.TestCase):
         self.client.docker_bin = "docker"
         mock_stdout = "sha256:123|nginx|latest|142MB\nsha256:456|postgres|15|379MB\n"
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_stdout)
-        
+
         images = self.client.list_images()
         self.assertEqual(len(images), 2)
         self.assertEqual(images[0]["id"], "sha256:123")
@@ -190,7 +192,7 @@ class TestDockerClient(unittest.TestCase):
     def test_remove_image(self, mock_run):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        
+
         success, msg = self.client.remove_image("sha256:123")
         self.assertTrue(success)
         self.assertIn("Successfully removed image", msg)
@@ -199,7 +201,7 @@ class TestDockerClient(unittest.TestCase):
     def test_rename_container(self, mock_run):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        
+
         success, msg = self.client.rename_container("c123", "new-web-app")
         self.assertTrue(success)
         self.assertIn("Successfully renamed container", msg)
@@ -214,7 +216,7 @@ class TestDockerClient(unittest.TestCase):
     def test_exec_command(self, mock_run):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(returncode=0, stdout="bin\nboot\ndev\netc\n")
-        
+
         output = self.client.exec_command("c123", "ls /")
         self.assertIn("bin", output)
         self.assertIn("boot", output)
@@ -381,11 +383,128 @@ class TestDockerClient(unittest.TestCase):
             else:
                 os.environ.pop("DOCKER_HOST", None)
 
+    def test_set_host_does_not_mutate_env(self):
+        orig = os.environ.get("DOCKER_HOST")
+        try:
+            os.environ.pop("DOCKER_HOST", None)
+            client = DockerClient()
+            client.set_host("ssh://new@host")
+            self.assertEqual(client.docker_host, "ssh://new@host")
+            # The process env is NOT mutated by set_host.
+            self.assertIsNone(os.environ.get("DOCKER_HOST"))
+            # And the legacy constructor with a host DOES mutate env.
+            DockerClient(host="ssh://legacy@host")
+            self.assertEqual(os.environ.get("DOCKER_HOST"), "ssh://legacy@host")
+        finally:
+            if orig is not None:
+                os.environ["DOCKER_HOST"] = orig
+            else:
+                os.environ.pop("DOCKER_HOST", None)
+
+    @patch("subprocess.run")
+    def test_search_images(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="nginx|Web server|15000|[OK]|\nalpine|Small Linux|8000||\n")
+        results = self.client.search_images("nginx")
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["name"], "nginx")
+        self.assertEqual(results[0]["stars"], "15000")
+        self.assertEqual(results[0]["official"], "[OK]")
+
+    @patch("subprocess.run")
+    def test_search_images_empty_query(self, mock_run):
+        self.client.docker_bin = "docker"
+        results = self.client.search_images("  ")
+        self.assertEqual(results, [])
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    def test_update_container_resources(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        success, msg = self.client.update_container_resources("c123", cpus=1.5, memory_bytes=512 * 1024 * 1024)
+        self.assertTrue(success)
+        cmd = mock_run.call_args.args[0]
+        self.assertIn("--cpus=1.5", cmd)
+        self.assertIn("--memory=536870912", cmd)
+        self.assertIn("c123", cmd)
+
+    @patch("subprocess.run")
+    def test_update_container_resources_no_changes(self, mock_run):
+        self.client.docker_bin = "docker"
+        success, msg = self.client.update_container_resources("c123")
+        self.assertFalse(success)
+        self.assertIn("No resource changes", msg)
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    def test_clone_container(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout="abc123\n")
+        success, msg = self.client.clone_container(
+            source_id="src", new_name="newcopy", image="nginx:latest", port_bindings=["8080:80"]
+        )
+        self.assertTrue(success)
+        cmd = mock_run.call_args.args[0]
+        self.assertEqual(cmd[0:4], ["docker", "run", "-d", "--name"])
+        self.assertIn("newcopy", cmd)
+        self.assertIn("nginx:latest", cmd)
+        self.assertIn("8080:80", cmd)
+
+    def test_clone_container_rejects_empty_name(self):
+        self.client.docker_bin = "docker"
+        success, msg = self.client.clone_container("src", "  ", "nginx")
+        self.assertFalse(success)
+        self.assertIn("name is required", msg)
+
+    def test_clone_container_requires_docker(self):
+        self.client.docker_bin = None
+        success, msg = self.client.clone_container("src", "x", "nginx")
+        self.assertFalse(success)
+        self.assertIn("not installed", msg)
+
+    def test_pull_image_args(self):
+        self.client.docker_bin = "docker"
+        self.assertEqual(self.client.pull_image_args("alpine"), ["docker", "pull", "alpine"])
+
+    def test_pull_image_args_no_docker(self):
+        self.client.docker_bin = None
+        self.assertEqual(self.client.pull_image_args("alpine"), [])
+
+    @patch("subprocess.run")
+    def test_volume_inspect(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps([{
+            "Name": "myvol", "Driver": "local", "Mountpoint": "/var/lib/docker/volumes/myvol/_data", "Scope": "local"
+        }]))
+        info = self.client.inspect_volume("myvol")
+        self.assertEqual(info["name"], "myvol")
+        self.assertEqual(info["driver"], "local")
+        self.assertIn("/var/lib/docker/volumes/myvol", info["mountpoint"])
+
+    @patch("subprocess.run")
+    def test_volume_contents(self, mock_run):
+        self.client.docker_bin = "docker"
+        mock_run.return_value = MagicMock(returncode=0, stdout=(
+            "total 12\n"
+            "drwxr-xr-x 3 root root 4096 Jan  1 00:00 .\n"
+            "drwxr-xr-x 1 root root 4096 Jan  1 00:00 ..\n"
+            "-rw-r--r-- 1 root root  100 Jan  1 00:00 hello.txt\n"
+            "drwxr-xr-x 2 root root 4096 Jan  1 00:00 sub\n"
+        ))
+        entries = self.client.list_volume_contents("myvol", path="/")
+        names = [e["name"] for e in entries]
+        self.assertIn("hello.txt", names)
+        self.assertIn("sub", names)
+        # Subdirectory entry should be marked as a directory.
+        sub = next(e for e in entries if e["name"] == "sub")
+        self.assertTrue(sub["mode"].startswith("d"))
+
     @patch("subprocess.run")
     def test_remove_network(self, mock_run):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        
+
         success, msg = self.client.remove_network("my-net")
         self.assertTrue(success)
         self.assertIn("Successfully removed network my-net", msg)
@@ -400,7 +519,7 @@ class TestDockerClient(unittest.TestCase):
     def test_run_compose_cmd(self, mock_run):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(returncode=0, stdout="Started compose")
-        
+
         success, msg = self.client.run_compose_cmd("myproject", "docker-compose.yml", "up")
         self.assertTrue(success)
         self.assertIn("Started compose", msg)
@@ -409,7 +528,9 @@ class TestDockerClient(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
-            timeout=10.0
+            encoding="utf-8",
+            errors="replace",
+            timeout=10.0,
         )
 
         success, msg = self.client.run_compose_cmd("myproject", "", "down")
@@ -419,7 +540,9 @@ class TestDockerClient(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
-            timeout=10.0
+            encoding="utf-8",
+            errors="replace",
+            timeout=10.0,
         )
 
     @patch("docktui.docker_client.DockerClient.inspect_container")
@@ -443,9 +566,9 @@ class TestDockerClient(unittest.TestCase):
             }
         }]
         mock_inspect.return_value = json.dumps(inspect_data)
-        
+
         snippet = self.client.generate_compose_snippet("container-id")
-        
+
         self.assertIn("version: '3.8'", snippet)
         self.assertIn("services:", snippet)
         self.assertIn("test_container:", snippet)
