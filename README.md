@@ -10,7 +10,6 @@
 
 **DockTUI** is a fast, zero-dependency terminal dashboard for monitoring, debugging, and managing local Docker containers and images. It is written in pure Python, talks to Docker through the Docker CLI, and keeps your existing Docker permissions and context intact.
 
-![DockTUI terminal preview](https://raw.githubusercontent.com/strmax195-hue/docktui/main/assets/demo.svg)
 
 Use DockTUI when you want something richer than repeated `docker ps`, `docker stats`, and `docker logs`, but lighter than a web dashboard or a heavyweight TUI framework.
 
