@@ -2,6 +2,20 @@
 
 All notable changes to DockTUI are documented here.
 
+## [1.4.0] - 2026-06-15
+
+### Added
+- **Detachable Panes** (`P` in Logs/Details view): Pin the active view to the bottom half of the terminal while returning to the main dashboard to navigate other containers.
+- **Bulk Start/Stop** (`Ctrl+S` on Containers tab): Quickly start or stop all containers currently matching the active filter.
+- **Inline Exec Search**: The exec input dialog now features type-to-search auto-completion against your execution history.
+- **Hotkey Overlays**: Define custom hotkeys in `config.json` (`hotkey_overlays` dict) to trigger shell commands inside the selected container with a single keypress.
+- **Configurable Poll Intervals**: `refresh_worker` now uses specific intervals based on resource type (e.g., faster for containers, slower for images/volumes/networks) defined in `poll_intervals` config.
+- **Extended Exports**: The `O` key export functionality is now available in the Settings, Search, Pull Progress, and Files views.
+- **Config Persistence**: Dynamically added `log_highlights` and `exec_presets` are now automatically saved back to the configuration file.
+
+### Fixed
+- Fixed an issue where the input modal could freeze and trap the user if closed improperly.
+
 ## [1.3.0] - 2026-06-07
 
 ### Added

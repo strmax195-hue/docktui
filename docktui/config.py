@@ -22,6 +22,9 @@ from .constants import (
     DEFAULT_LOG_TAIL_LIMIT,
     DEFAULT_LOG_TAIL_STEP,
     DEFAULT_REFRESH_INTERVAL,
+    DEFAULT_REFRESH_INTERVAL_IMAGES,
+    DEFAULT_REFRESH_INTERVAL_NETWORKS,
+    DEFAULT_REFRESH_INTERVAL_VOLUMES,
     DEFAULT_SCROLL_DELTA,
     DEFAULT_THEME,
 )
@@ -30,6 +33,9 @@ from .constants import (
 @dataclass
 class Config:
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
+    refresh_interval_images: float = DEFAULT_REFRESH_INTERVAL_IMAGES
+    refresh_interval_volumes: float = DEFAULT_REFRESH_INTERVAL_VOLUMES
+    refresh_interval_networks: float = DEFAULT_REFRESH_INTERVAL_NETWORKS
     docker_timeout: float = DEFAULT_DOCKER_TIMEOUT
     theme: str = DEFAULT_THEME
     log_tail_limit: int = DEFAULT_LOG_TAIL_LIMIT
@@ -42,6 +48,7 @@ class Config:
     exec_presets: List[str] = None  # type: ignore[assignment]
     log_highlights: List[Dict[str, str]] = None  # type: ignore[assignment]
     endpoints: List[Dict[str, str]] = None  # type: ignore[assignment]
+    hotkey_overlays: Dict[str, str] = None  # type: ignore[assignment]
     active_endpoint: Optional[str] = None
 
     _CANDIDATE_PATHS: ClassVar[tuple] = (
@@ -56,6 +63,8 @@ class Config:
             self.log_highlights = []
         if self.endpoints is None:
             self.endpoints = []
+        if self.hotkey_overlays is None:
+            self.hotkey_overlays = {}
 
     # ------------------------------------------------------------------ load/save
 
@@ -113,6 +122,9 @@ class Config:
                 clean[key] = list(value)
             else:
                 clean[key] = []
+        # Coerce dict fields
+        if not isinstance(clean.get("hotkey_overlays"), dict):
+            clean["hotkey_overlays"] = {}
         # Normalize theme to a known preset.
         if clean.get("theme") not in AVAILABLE_THEMES:
             clean["theme"] = DEFAULT_THEME
@@ -124,6 +136,12 @@ class Config:
         """Clamp the config to safe ranges in-place."""
         if self.refresh_interval < 0.5:
             self.refresh_interval = DEFAULT_REFRESH_INTERVAL
+        if self.refresh_interval_images < 0.5:
+            self.refresh_interval_images = DEFAULT_REFRESH_INTERVAL_IMAGES
+        if self.refresh_interval_volumes < 0.5:
+            self.refresh_interval_volumes = DEFAULT_REFRESH_INTERVAL_VOLUMES
+        if self.refresh_interval_networks < 0.5:
+            self.refresh_interval_networks = DEFAULT_REFRESH_INTERVAL_NETWORKS
         if self.docker_timeout < 1.0:
             self.docker_timeout = DEFAULT_DOCKER_TIMEOUT
         if self.log_tail_limit < self.log_min:
@@ -141,3 +159,4 @@ class Config:
         self.exec_presets = [str(p) for p in (self.exec_presets or []) if str(p).strip()]
         self.log_highlights = [h for h in (self.log_highlights or []) if isinstance(h, dict)]
         self.endpoints = [e for e in (self.endpoints or []) if isinstance(e, dict)]
+        self.hotkey_overlays = {str(k): str(v) for k, v in (self.hotkey_overlays or {}).items()}

@@ -35,23 +35,18 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - **Volume Directory Explorer** (`Shift+F` on Volumes): in-app directory browser for Docker volumes.
 - **Log Highlighting & Regex Filtering** (`H` in Logs view): regex-based highlight patterns configured via the config file and toggleable from the keyboard.
 
-## Near term
-
-- Compose snippet export to file (reuse the existing `O` export pattern).
-- Save logs/inspect/diff views via a single `O` key already shipped; expose the same export from the new Settings/Search/Pull/Files views.
-- Bulk container start/stop on the Containers tab (operate on the visible filter).
+- Compose snippet export to file.
+- Save logs/inspect/diff views via a single `O` key exposed from the Settings, Search, Pull, and Files views.
+- Bulk container start/stop on the Containers tab (operate on the visible filter via `Ctrl+s`).
 - Persist last-used `log_highlights` and `exec_presets` in addition to the static defaults.
-
-## Later
-
 - **Inline shell history search**: type-to-search through past exec commands on the Exec modal.
-- **Detachable dashboard panes**: let users split the screen to keep logs open while navigating containers.
+- **Detachable dashboard panes**: let users split the screen to keep logs open while navigating containers (`P` to pin).
 - **Configurable poll interval per resource type**: slower refresh for volumes/networks, faster for containers.
 - **Plugin-style hotkey overlays**: users can register custom hotkeys in the config file that run shell commands or shell scripts in the active container.
 
-## Feedback wanted
+## Roadmap Complete (v1.4.0)
 
-Open an issue if a Docker workflow feels repetitive enough that DockTUI should make it one keypress.
+With the release of version 1.4.0, DockTUI has achieved its primary roadmap goals for a comprehensive local Docker management experience. Future updates will focus on bug fixes, performance, and keeping up with upstream Docker changes.
 
 ## Feedback wanted
 

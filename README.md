@@ -112,6 +112,17 @@ Example configuration:
     "ps aux",
     "df -h"
   ],
+  "poll_intervals": {
+    "containers": 3.0,
+    "images": 15.0,
+    "volumes": 30.0,
+    "networks": 30.0,
+    "contexts": 10.0
+  },
+  "hotkey_overlays": {
+    "ctrl+l": "ls -l",
+    "ctrl+e": "env"
+  },
   "log_highlights": [
     {"label": "errors", "pattern": "ERROR|FAIL"},
     {"label": "auth",   "pattern": "AUTH|login"}
@@ -176,6 +187,7 @@ Press **S** to save (writes to `~/.config/docktui/config.json`) and apply change
 - **`Q`**: Exit DockTUI.
 
 #### Containers & Compose Tabs
+- **`Ctrl+S`**: Bulk Start or Stop all containers matching the active filter.
 - **`S`**: Start or Stop the selected container.
 - **`S` on a Compose project row**: Start or stop all containers in that project group.
 - **`R`**: Restart the selected container.
@@ -214,6 +226,7 @@ Press **S** to save (writes to `~/.config/docktui/config.json`) and apply change
 - **`↑` / `↓` (Arrow Keys) or Mouse Scroll Wheel**: Scroll content.
 - **`Esc` or View Key**: Return back to the main dashboard.
 - **Logs View Features**:
+  - `P`: Pin the logs view to the bottom half of the terminal (Detachable Panes) and return to the main dashboard.
   - `F`: Toggle follow mode to keep refreshing and pinning logs to the newest lines.
   - `Space`: Pause follow mode.
   - `/`: Search/filter logs for specific terms.
@@ -224,10 +237,11 @@ Press **S** to save (writes to `~/.config/docktui/config.json`) and apply change
   - `C`: Clear active log filters.
   - `+` / `-`: Increase/decrease log line retrieval limits.
 - **Inspect, Details, Top, Compose Snippet Views**:
+  - `P` (Details View only): Pin the details view to the bottom half of the terminal.
   - `O`: Export the current view buffer to a local file.
 - **Exec View Features**:
   - `R`: Re-run the current command.
-  - `E`: Execute a new preset, recent, or custom command.
+  - `E`: Execute a new preset, recent, or custom command (supports inline type-to-search auto-completion).
 - **System View Features**:
   - `X`: Trigger `docker system prune -f` after typing `PRUNE`.
   - `I`: Trigger `docker image prune -f` after typing `IMAGES`.
@@ -236,16 +250,19 @@ Press **S** to save (writes to `~/.config/docktui/config.json`) and apply change
 - **Settings View Features**:
   - `Up` / `Down`: Move between settings.
   - `Enter`: Edit the highlighted setting.
+  - `O`: Export settings to a file.
   - `S`: Save the configuration.
   - `Esc`: Return without saving.
 - **Search & Pull View Features**:
   - `Up` / `Down`: Move through search results.
   - `Enter`: Pull the highlighted image (live progress view).
+  - `O`: Export search results or pull progress to a file.
   - `Esc`: Cancel and return.
 - **Volume File Browser Features**:
   - `Up` / `Down`: Move through entries.
   - `Enter`: Open a directory.
   - `Backspace`: Go up one level.
+  - `O`: Export the file list to a file.
   - `Esc`: Return to the dashboard.
 
 ---

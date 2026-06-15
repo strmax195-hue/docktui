@@ -24,6 +24,9 @@ DEFAULT_THEME: str = "dark"
 
 #: Default refresh interval (seconds) for the dashboard data refresh worker.
 DEFAULT_REFRESH_INTERVAL: float = 2.0
+DEFAULT_REFRESH_INTERVAL_IMAGES: float = 4.0
+DEFAULT_REFRESH_INTERVAL_VOLUMES: float = 10.0
+DEFAULT_REFRESH_INTERVAL_NETWORKS: float = 10.0
 
 #: Default timeout (seconds) applied to every `docker` CLI invocation.
 DEFAULT_DOCKER_TIMEOUT: float = 10.0

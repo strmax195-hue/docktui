@@ -283,6 +283,8 @@ class ContainerDashboard:
         # ---------------------------------------------------------------- modal
         self.input_dialog = DialogResult()
         self.need_redraw = True
+        self.pinned_view = None
+        self.pinned_target = None
         self._quit_requested = False
         self._viewport_h = 0
 
@@ -355,7 +357,15 @@ class ContainerDashboard:
 
     def refresh_worker(self) -> None:
         while not self.stop_refresh.is_set():
-            self.refresh_requested.wait(timeout=self.refresh_interval)
+            interval = self.refresh_interval
+            if self.current_tab == "images":
+                interval = self.config.refresh_interval_images
+            elif self.current_tab == "volumes":
+                interval = self.config.refresh_interval_volumes
+            elif self.current_tab == "networks":
+                interval = self.config.refresh_interval_networks
+
+            self.refresh_requested.wait(timeout=interval)
             self.refresh_requested.clear()
             if self.stop_refresh.is_set():
                 break
@@ -461,6 +471,22 @@ class ContainerDashboard:
 
     def export_compose_snippet_to_file(self, filepath: str) -> None:
         self._export_lines_to_file(self.compose_snippet_lines, "Compose Snippet", filepath)
+
+    def export_settings_to_file(self, filepath: str) -> None:
+        lines = [f"{opt['label']}: {opt['display']()}" for opt in self.settings_options]
+        self._export_lines_to_file(lines, "Settings", filepath)
+
+    def export_search_to_file(self, filepath: str) -> None:
+        lines = [str(r) for r in self.search_results]
+        self._export_lines_to_file(lines, "Search Results", filepath)
+
+    def export_pull_progress_to_file(self, filepath: str) -> None:
+        self._export_lines_to_file(self.pull_lines, "Pull Progress", filepath)
+
+    def export_files_to_file(self, filepath: str) -> None:
+        lines = [f"{e['name']} ({e['type']}) - {e['size']}" for e in self.file_entries]
+        self._export_lines_to_file(lines, "Files", filepath)
+
 
     # ------------------------------------------------------------- data shaping
 
@@ -690,24 +716,23 @@ class ContainerDashboard:
         self.exec_history = self.exec_history[: self.config.exec_history_cap]
 
     def start_exec_input(self, container: Dict[str, str]) -> None:
-        presets = ", ".join(f"{idx + 1}={cmd}" for idx, cmd in enumerate(self.config.exec_presets))
-        prompt = f"Command inside {container['name']} ({presets}, or custom): "
+        prompt = f"Command inside {container['name']} (type to search history, or custom): "
 
         def submit(value: str) -> None:
             command = value
-            if value.isdigit():
-                index = int(value) - 1
-                if 0 <= index < len(self.config.exec_presets):
-                    command = self.config.exec_presets[index]
+            matches = [cmd for cmd in self.exec_history if value.lower() in cmd.lower()]
+            if matches and value == matches[0][:len(value)]:
+                command = matches[0]
             if not command:
                 self.set_status("Command canceled.")
                 return
             self.active_container = container
             self.exec_command_text = command
             self.record_exec_command(command)
+            self.config.save()
             self.set_status(f"Running command: {command}...")
             output = self.client.exec_command(container["id"], command)
-            self.exec_output_lines = output.split("\n")
+            self.exec_output_lines = output.split("\\n")
             self.exec_scroll_index = 0
             self.view_mode = ViewMode.EXEC
 
@@ -785,7 +810,8 @@ class ContainerDashboard:
         size = get_terminal_size()
         width = size.width
 
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         if self.client.docker_host:
             parsed = self.client.parse_docker_host()
             host_display = parsed["display"] if parsed else self.client.docker_host
@@ -1101,8 +1127,9 @@ class ContainerDashboard:
 
         size = get_terminal_size()
         width, height = size.width, size.height
-        clear_screen()
-        viewport_height = viewport_height_for(height)
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
+        viewport_height = self.get_viewport_height(height)
 
         if not self.log_lines:
             self.load_log_lines(target_id, viewport_height, follow=self.log_follow)
@@ -1142,11 +1169,12 @@ class ContainerDashboard:
             return
         size = get_terminal_size()
         width, height = size.width, size.height
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         scroll_index = getattr(self, scroll_index_attr)
         title_text = f"{title} (Line {scroll_index + 1} of {len(lines)})"
         draw_frame(title_text, width)
-        viewport_height = viewport_height_for(height)
+        viewport_height = self.get_viewport_height(height)
         visible, _, _ = slice_viewport(lines, scroll_index, viewport_height)
         for line in visible:
             print(line[: width - 1])
@@ -1203,10 +1231,11 @@ class ContainerDashboard:
         sel = self.active_container or self.containers[self.selected_index]
         size = get_terminal_size()
         width, height = size.width, size.height
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         title_text = f"EXEC OUT: {sel['name']} > {self.exec_command_text[:30]} (Line {self.exec_scroll_index + 1} of {len(self.exec_output_lines)})"
         draw_frame(title_text, width)
-        viewport_height = viewport_height_for(height)
+        viewport_height = self.get_viewport_height(height)
         visible, _, _ = slice_viewport(self.exec_output_lines, self.exec_scroll_index, viewport_height)
         for line in visible:
             print(line[: width - 1])
@@ -1217,7 +1246,8 @@ class ContainerDashboard:
     def draw_system_view(self) -> None:
         size = get_terminal_size()
         width = size.width
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         draw_frame("DOCKER SYSTEM DISK USAGE & CLEANUP", width)
         if not self.system_info_text:
             self.system_info_text = self.client.get_disk_usage()
@@ -1229,12 +1259,17 @@ class ContainerDashboard:
     def draw_input_view(self) -> None:
         previous = self.previous_view_mode
         self._dispatch_view(previous)
-        print(f"\n{YELLOW}{BOLD}{self.input_dialog.prompt}{RESET}{self.input_dialog.buffer}", end="", flush=True)
+        print(f"\\n{YELLOW}{BOLD}{self.input_dialog.prompt}{RESET}{self.input_dialog.buffer}", end="", flush=True)
+        if "type to search history" in self.input_dialog.prompt:
+            matches = [cmd for cmd in self.exec_history if self.input_dialog.buffer.lower() in cmd.lower()]
+            if matches:
+                print(f"\\n{CYAN}Matches: {', '.join(matches[:5])}{RESET}", end="", flush=True)
 
     def draw_help_view(self) -> None:
         size = get_terminal_size()
         width = size.width
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         draw_frame("DockTUI Help", width)
         print(f"{BOLD}Global{RESET}")
         print("  Tab / 1-6    Switch tabs")
@@ -1282,7 +1317,8 @@ class ContainerDashboard:
     def draw_settings_view(self) -> None:
         size = get_terminal_size()
         width = size.width
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         draw_frame("DOCKTUI SETTINGS", width)
         print(f"{BOLD}Edit the active configuration. Press Enter to edit the highlighted entry.{RESET}")
         print("─" * (width - 1))
@@ -1301,7 +1337,8 @@ class ContainerDashboard:
         """Show a simple registry search results picker."""
         size = get_terminal_size()
         width = size.width
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         draw_frame("REGISTRY SEARCH", width)
         if not self.search_results:
             print(f"{YELLOW}No search results. Use the dialog to enter a query.{RESET}")
@@ -1316,7 +1353,8 @@ class ContainerDashboard:
     def draw_pull_progress_view(self) -> None:
         size = get_terminal_size()
         width = size.width
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         title = f"PULLING: {self.pull_image_name}"
         draw_frame(title, width)
         visible, _, _ = slice_viewport(self.pull_lines, self.pull_scroll_index, max(1, size.height - 6))
@@ -1329,7 +1367,8 @@ class ContainerDashboard:
     def draw_files_view(self) -> None:
         size = get_terminal_size()
         width = size.width
-        clear_screen()
+        if not getattr(self, "_split_screen_mode", False):
+            clear_screen()
         title = f"VOLUME FILES: {self.file_volume_name}  [{self.file_path}]"
         draw_frame(title, width)
         if not self.file_entries:
@@ -1441,6 +1480,7 @@ class ContainerDashboard:
                                 "label": label.strip(),
                                 "pattern": pattern.strip(),
                             })
+                        self.config.save()
             except ValueError as e:
                 self.set_status(f"Invalid value: {e}")
                 return
@@ -1749,6 +1789,12 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- view dispatch
 
+    def get_viewport_height(self, height: int) -> int:
+        h = viewport_height_for(height)
+        if getattr(self, "_split_screen_mode", False):
+            return max(5, (h // 2) - 1)
+        return h
+
     def _dispatch_view(self, view: ViewMode) -> None:
         if view == ViewMode.MAIN:
             self.draw_main_view()
@@ -1780,7 +1826,24 @@ class ContainerDashboard:
             self.draw_files_view()
 
     def draw_current(self) -> None:
-        self._dispatch_view(self.view_mode)
+        if self.pinned_view and self.view_mode == ViewMode.MAIN:
+            self._split_screen_mode = True
+            try:
+                self.draw_main_view()
+                size = get_terminal_size()
+                print("═" * (size.width - 1))
+                orig_view_mode = self.view_mode
+                orig_active = self.active_container
+                self.view_mode = self.pinned_view
+                self.active_container = self.pinned_target
+                self._dispatch_view(self.pinned_view)
+                self.view_mode = orig_view_mode
+                self.active_container = orig_active
+            finally:
+                self._split_screen_mode = False
+        else:
+            self._split_screen_mode = False
+            self._dispatch_view(self.view_mode)
 
     # ------------------------------------------------------------- interactive exec
 
