@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import mock_open, patch
 
 from docktui.config import Config
+from docktui.enums import ViewMode
 from docktui.tui import ContainerDashboard
 
 
@@ -249,6 +250,53 @@ class TestContainerDashboardState(unittest.TestCase):
         # Toggling again disables.
         dashboard._toggle_log_highlights()
         self.assertIsNone(dashboard.log_highlight_regex)
+
+    # ---- Input dialog state reset (regression) -----------------------------
+
+    def test_input_dialog_enter_resets_view_and_dialog(self):
+        """Enter must submit, then return to the previous view and clear the modal."""
+        dashboard = ContainerDashboard()
+        dashboard.view_mode = ViewMode.MAIN
+        received: list = []
+        dashboard.start_input("prompt", lambda v: received.append(v))
+
+        dashboard.handle_input_key("e")
+        dashboard.handle_input_key("n")
+        # Reset buffer and type fresh value.
+        dashboard.input_dialog.buffer = ""
+        for ch in "hello":
+            dashboard.handle_input_key(ch)
+        dashboard.handle_input_key("enter")
+
+        self.assertEqual(received, ["hello"])
+        self.assertEqual(dashboard.view_mode, ViewMode.MAIN)
+        self.assertEqual(dashboard.input_dialog.prompt, "")
+
+    def test_input_dialog_esc_invokes_cancel_and_resets(self):
+        """Esc must fire cancel and restore the previous view without leaving the modal alive."""
+        dashboard = ContainerDashboard()
+        dashboard.view_mode = ViewMode.LOGS
+        cancelled: list = []
+        dashboard.start_input("prompt", lambda _v: None, cancel_callback=lambda: cancelled.append(True))
+
+        dashboard.handle_input_key("\x1b")
+
+        self.assertEqual(cancelled, [True])
+        self.assertEqual(dashboard.view_mode, ViewMode.LOGS)
+        self.assertEqual(dashboard.input_dialog.prompt, "")
+
+    def test_dashboard_initializes_runtime_attributes(self):
+        """All attributes read during the run loop / view dispatch must exist up front."""
+        dashboard = ContainerDashboard()
+        for attr in (
+            "search_results", "search_index", "file_index",
+            "_quit_requested", "_viewport_h",
+        ):
+            self.assertTrue(hasattr(dashboard, attr), f"missing attribute: {attr}")
+        self.assertEqual(dashboard.search_results, [])
+        self.assertEqual(dashboard.search_index, 0)
+        self.assertEqual(dashboard.file_index, 0)
+        self.assertFalse(dashboard._quit_requested)
 
 
 if __name__ == "__main__":

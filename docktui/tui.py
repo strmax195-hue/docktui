@@ -262,9 +262,12 @@ class ContainerDashboard:
         self.pull_lines: List[str] = []
         self.pull_scroll_index = 0
         self.pull_image_name = ""
+        self.search_results: List[Dict[str, str]] = []
+        self.search_index = 0
         self.file_entries: List[Dict[str, str]] = []
         self.file_path = "/"
         self.file_volume_name = ""
+        self.file_index = 0
 
         # ---------------------------------------------------------------- threading
         self.data_lock = threading.Lock()
@@ -280,6 +283,8 @@ class ContainerDashboard:
         # ---------------------------------------------------------------- modal
         self.input_dialog = DialogResult()
         self.need_redraw = True
+        self._quit_requested = False
+        self._viewport_h = 0
 
         # ---------------------------------------------------------------- keymap
         self.keymap = Keymap()
@@ -404,6 +409,15 @@ class ContainerDashboard:
             callback(value)
 
     def handle_input_key(self, key: str) -> None:
+        # submit/cancel must reset view_mode and clear the dialog; the generic
+        # `apply_dialog_key` only fires the callback and leaves the modal alive,
+        # which would leave the user stuck in the input view.
+        if key == "enter":
+            self.submit_input()
+            return
+        if key in ("\x1b", "q"):
+            self.cancel_input()
+            return
         if apply_dialog_key(self.input_dialog, key):
             self.need_redraw = True
 
@@ -1784,6 +1798,8 @@ class ContainerDashboard:
             self.prompt_user("Press Enter to continue...")
             return
         if not self.client.docker_bin:
+            self.start_refresh_worker()
+            self.prompt_user("Press Enter to continue...")
             return
         cmd = [self.client.docker_bin, "exec", "-it", container_id] + cmd_parts
         try:
