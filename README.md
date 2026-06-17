@@ -55,11 +55,13 @@ Use DockTUI when you want something richer than repeated `docker ps`, `docker st
 
 ## Installation
 
-Install the latest code from GitHub:
+Install the latest version directly from PyPI:
 
 ```bash
-pip install git+https://github.com/strmax195-hue/docktui.git
+pip install docktui
 ```
+
+*(Alternatively, you can install the latest development branch from GitHub: `pip install git+https://github.com/strmax195-hue/docktui.git`)*
 
 Local development:
 
@@ -73,9 +75,14 @@ pip install -e .
 
 ## Usage
 
-Simply run:
+If your Python `Scripts` or `bin` directory is in your system `PATH`, you can simply run:
 ```bash
 docktui
+```
+
+**Note:** If your terminal says `command not found` (which can happen on Windows), you can always launch it directly as a Python module:
+```bash
+python -m docktui
 ```
 
 Useful options:
