@@ -55,8 +55,12 @@ Use DockTUI when you want something richer than repeated `docker ps`, `docker st
 
 ## Installation
 
-Install the latest version directly from PyPI:
+**Option 1: Install from GitHub Releases (Recommended)**
+```bash
+pip install https://github.com/strmax195-hue/docktui/releases/download/v1.4.0/docktui-1.4.0-py3-none-any.whl
+```
 
+**Option 2: Install from PyPI**
 ```bash
 pip install docktui
 ```
