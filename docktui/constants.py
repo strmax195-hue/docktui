@@ -4,6 +4,7 @@ All user-facing knobs (those that an in-app config editor should expose)
 are grouped here so that `Config` validation, `cli.py` argparse defaults
 and the TUI share a single source of truth.
 """
+
 from typing import Tuple
 
 #: Available color theme presets (used by `argparse` choices and theme cycle order).

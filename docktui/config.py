@@ -6,6 +6,7 @@ values, and write itself back. It is the single source of truth for tunable
 runtime options and the in-app configuration editor (`Phase 2A`) saves through
 this object.
 """
+
 import json
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path

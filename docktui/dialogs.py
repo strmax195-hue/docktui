@@ -5,6 +5,7 @@ This module exposes a typed `DialogResult` and a small `TextInputDialog` value
 object that views can use without duplicating the prompt / submit / cancel
 plumbing.
 """
+
 from dataclasses import dataclass
 from typing import Callable, Optional
 

@@ -4,6 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://badge.fury.io/py/docktui.svg)](https://pypi.org/project/docktui/)
+[![PyPI Downloads](https://static.pepy.tech/badge/docktui)](https://pepy.tech/project/docktui)
 [![Tests](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml/badge.svg)](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml)
 [![Lint](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml/badge.svg?job=lint)](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)

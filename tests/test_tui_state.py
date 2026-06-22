@@ -148,8 +148,20 @@ class TestContainerDashboardState(unittest.TestCase):
     @patch("docktui.docker_client.DockerClient.search_images")
     def test_start_registry_search_stores_results(self, mock_search):
         mock_search.return_value = [
-            {"name": "nginx", "description": "Web server", "stars": "100", "official": "[OK]", "automated": ""},
-            {"name": "alpine", "description": "Linux", "stars": "200", "official": "[OK]", "automated": ""},
+            {
+                "name": "nginx",
+                "description": "Web server",
+                "stars": "100",
+                "official": "[OK]",
+                "automated": "",
+            },
+            {
+                "name": "alpine",
+                "description": "Linux",
+                "stars": "200",
+                "official": "[OK]",
+                "automated": "",
+            },
         ]
         dashboard = ContainerDashboard()
         dashboard.start_registry_search()
@@ -219,12 +231,18 @@ class TestContainerDashboardState(unittest.TestCase):
     def test_container_clone_uses_inspect_details(self, mock_clone):
         mock_clone.return_value = (True, "cloned")
         dashboard = ContainerDashboard()
-        dashboard.containers = [{"id": "src", "name": "web", "image": "nginx:latest", "state": "running"}]
+        dashboard.containers = [
+            {"id": "src", "name": "web", "image": "nginx:latest", "state": "running"}
+        ]
         dashboard.current_tab = "containers"
         dashboard.selected_index = 0
 
         with patch("docktui.docker_client.DockerClient.get_container_details") as mock_details:
-            mock_details.return_value = {"name": "web", "image": "nginx:latest", "ports": "0.0.0.0:8080->80/tcp"}
+            mock_details.return_value = {
+                "name": "web",
+                "image": "nginx:latest",
+                "ports": "0.0.0.0:8080->80/tcp",
+            }
             dashboard.start_container_clone()
             callback = dashboard.input_dialog.submit
             callback("web-copy")
@@ -277,7 +295,9 @@ class TestContainerDashboardState(unittest.TestCase):
         dashboard = ContainerDashboard()
         dashboard.view_mode = ViewMode.LOGS
         cancelled: list = []
-        dashboard.start_input("prompt", lambda _v: None, cancel_callback=lambda: cancelled.append(True))
+        dashboard.start_input(
+            "prompt", lambda _v: None, cancel_callback=lambda: cancelled.append(True)
+        )
 
         dashboard.handle_input_key("\x1b")
 
@@ -289,8 +309,11 @@ class TestContainerDashboardState(unittest.TestCase):
         """All attributes read during the run loop / view dispatch must exist up front."""
         dashboard = ContainerDashboard()
         for attr in (
-            "search_results", "search_index", "file_index",
-            "_quit_requested", "_viewport_h",
+            "search_results",
+            "search_index",
+            "file_index",
+            "_quit_requested",
+            "_viewport_h",
         ):
             self.assertTrue(hasattr(dashboard, attr), f"missing attribute: {attr}")
         self.assertEqual(dashboard.search_results, [])
@@ -301,5 +324,5 @@ class TestContainerDashboardState(unittest.TestCase):
 
 if __name__ == "__main__":
     from unittest.mock import mock_open, patch
-    unittest.main()
 
+    unittest.main()

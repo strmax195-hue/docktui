@@ -1,4 +1,5 @@
 """Command-line entry point for DockTUI."""
+
 import argparse
 import json
 import sys
@@ -48,6 +49,7 @@ def _build_config_from_args(args: argparse.Namespace, file_config: Dict[str, Any
     if args.theme:
         # CLI uses the legacy "high-contrast" spelling; Config uses the underscored one.
         from .styles import _LEGACY_THEME_ALIASES
+
         config.theme = _LEGACY_THEME_ALIASES.get(args.theme, args.theme)
     config.validate()
     return config
@@ -76,7 +78,8 @@ def main() -> None:
         help="Timeout for Docker CLI commands in seconds. Default: 10.0",
     )
     parser.add_argument(
-        "--host", "-H",
+        "--host",
+        "-H",
         type=str,
         help="Docker daemon socket/host to connect to (e.g. ssh://user@host, tcp://192.168.1.100:2375). Overrides DOCKER_HOST env var.",
     )

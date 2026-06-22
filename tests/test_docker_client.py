@@ -123,7 +123,9 @@ class TestDockerClient(unittest.TestCase):
     @patch("subprocess.run")
     def test_top_container(self, mock_run):
         self.client.docker_bin = "docker"
-        mock_run.return_value = MagicMock(returncode=0, stdout="PID USER TIME COMMAND\n1 root 0:00 app\n")
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="PID USER TIME COMMAND\n1 root 0:00 app\n"
+        )
 
         output = self.client.top_container("c123")
 
@@ -230,8 +232,7 @@ class TestDockerClient(unittest.TestCase):
 
         self.assertIn("hello world", output)
         self.assertEqual(
-            mock_run.call_args.args[0],
-            ["docker", "exec", "c123", "sh", "-c", "echo hello world"]
+            mock_run.call_args.args[0], ["docker", "exec", "c123", "sh", "-c", "echo hello world"]
         )
 
     def test_exec_command_rejects_invalid_quoting(self):
@@ -246,7 +247,7 @@ class TestDockerClient(unittest.TestCase):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout='''[{
+            stdout="""[{
                 "Id": "c1234567890abcdef",
                 "Name": "/web",
                 "Created": "2026-01-01T00:00:00Z",
@@ -268,7 +269,7 @@ class TestDockerClient(unittest.TestCase):
                     }
                 },
                 "Mounts": [{"Source": "/host", "Destination": "/app", "Mode": "rw"}]
-            }]'''
+            }]""",
         )
 
         details = self.client.get_container_details("c123")
@@ -300,7 +301,7 @@ class TestDockerClient(unittest.TestCase):
         self.assertEqual(output, "compose-logs-output\n")
         self.assertEqual(
             mock_run.call_args.args[0],
-            ["docker", "compose", "-p", "myproject", "logs", "--tail=50"]
+            ["docker", "compose", "-p", "myproject", "logs", "--tail=50"],
         )
 
     @patch("subprocess.run")
@@ -404,7 +405,9 @@ class TestDockerClient(unittest.TestCase):
     @patch("subprocess.run")
     def test_search_images(self, mock_run):
         self.client.docker_bin = "docker"
-        mock_run.return_value = MagicMock(returncode=0, stdout="nginx|Web server|15000|[OK]|\nalpine|Small Linux|8000||\n")
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="nginx|Web server|15000|[OK]|\nalpine|Small Linux|8000||\n"
+        )
         results = self.client.search_images("nginx")
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["name"], "nginx")
@@ -422,7 +425,9 @@ class TestDockerClient(unittest.TestCase):
     def test_update_container_resources(self, mock_run):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        success, msg = self.client.update_container_resources("c123", cpus=1.5, memory_bytes=512 * 1024 * 1024)
+        success, msg = self.client.update_container_resources(
+            "c123", cpus=1.5, memory_bytes=512 * 1024 * 1024
+        )
         self.assertTrue(success)
         cmd = mock_run.call_args.args[0]
         self.assertIn("--cpus=1.5", cmd)
@@ -474,9 +479,19 @@ class TestDockerClient(unittest.TestCase):
     @patch("subprocess.run")
     def test_volume_inspect(self, mock_run):
         self.client.docker_bin = "docker"
-        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps([{
-            "Name": "myvol", "Driver": "local", "Mountpoint": "/var/lib/docker/volumes/myvol/_data", "Scope": "local"
-        }]))
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                [
+                    {
+                        "Name": "myvol",
+                        "Driver": "local",
+                        "Mountpoint": "/var/lib/docker/volumes/myvol/_data",
+                        "Scope": "local",
+                    }
+                ]
+            ),
+        )
         info = self.client.inspect_volume("myvol")
         self.assertEqual(info["name"], "myvol")
         self.assertEqual(info["driver"], "local")
@@ -485,13 +500,16 @@ class TestDockerClient(unittest.TestCase):
     @patch("subprocess.run")
     def test_volume_contents(self, mock_run):
         self.client.docker_bin = "docker"
-        mock_run.return_value = MagicMock(returncode=0, stdout=(
-            "total 12\n"
-            "drwxr-xr-x 3 root root 4096 Jan  1 00:00 .\n"
-            "drwxr-xr-x 1 root root 4096 Jan  1 00:00 ..\n"
-            "-rw-r--r-- 1 root root  100 Jan  1 00:00 hello.txt\n"
-            "drwxr-xr-x 2 root root 4096 Jan  1 00:00 sub\n"
-        ))
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "total 12\n"
+                "drwxr-xr-x 3 root root 4096 Jan  1 00:00 .\n"
+                "drwxr-xr-x 1 root root 4096 Jan  1 00:00 ..\n"
+                "-rw-r--r-- 1 root root  100 Jan  1 00:00 hello.txt\n"
+                "drwxr-xr-x 2 root root 4096 Jan  1 00:00 sub\n"
+            ),
+        )
         entries = self.client.list_volume_contents("myvol", path="/")
         names = [e["name"] for e in entries]
         self.assertIn("hello.txt", names)
@@ -548,23 +566,23 @@ class TestDockerClient(unittest.TestCase):
     @patch("docktui.docker_client.DockerClient.inspect_container")
     def test_generate_compose_snippet(self, mock_inspect):
         self.client.docker_bin = "docker"
-        inspect_data = [{
-            "Name": "/test-container",
-            "Config": {
-                "Image": "nginx:alpine",
-                "Env": ["PATH=/usr/local/sbin", "MY_VAR=hello"],
-                "RestartPolicy": {"Name": "unless-stopped"},
-                "Labels": {"my.label": "value", "com.docker.compose.project": "ignored"}
-            },
-            "HostConfig": {
-                "RestartPolicy": {"Name": "unless-stopped"},
-                "PortBindings": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]},
-                "Binds": ["/host/path:/container/path:ro"]
-            },
-            "NetworkSettings": {
-                "Networks": {"my-network": {}}
+        inspect_data = [
+            {
+                "Name": "/test-container",
+                "Config": {
+                    "Image": "nginx:alpine",
+                    "Env": ["PATH=/usr/local/sbin", "MY_VAR=hello"],
+                    "RestartPolicy": {"Name": "unless-stopped"},
+                    "Labels": {"my.label": "value", "com.docker.compose.project": "ignored"},
+                },
+                "HostConfig": {
+                    "RestartPolicy": {"Name": "unless-stopped"},
+                    "PortBindings": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]},
+                    "Binds": ["/host/path:/container/path:ro"],
+                },
+                "NetworkSettings": {"Networks": {"my-network": {}}},
             }
-        }]
+        ]
         mock_inspect.return_value = json.dumps(inspect_data)
 
         snippet = self.client.generate_compose_snippet("container-id")
@@ -576,7 +594,7 @@ class TestDockerClient(unittest.TestCase):
         self.assertIn("container_name: test-container", snippet)
         self.assertIn("restart: unless-stopped", snippet)
         self.assertIn("ports:", snippet)
-        self.assertIn("- \"8080:80/tcp\"", snippet)
+        self.assertIn('- "8080:80/tcp"', snippet)
         self.assertIn("volumes:", snippet)
         self.assertIn("- /host/path:/container/path:ro", snippet)
         self.assertIn("environment:", snippet)
@@ -585,9 +603,9 @@ class TestDockerClient(unittest.TestCase):
         self.assertIn("networks:", snippet)
         self.assertIn("- my-network", snippet)
         self.assertIn("labels:", snippet)
-        self.assertIn("- \"my.label=value\"", snippet)
+        self.assertIn('- "my.label=value"', snippet)
         self.assertNotIn("com.docker.compose", snippet)
+
 
 if __name__ == "__main__":
     unittest.main()
-

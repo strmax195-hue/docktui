@@ -4,6 +4,7 @@ The legacy TUI had an inline if/elif ladder with hundreds of branches in
 `ContainerDashboard.run`. The `Keymap` dataclass here gives views and
 key-handlers a structured, testable way to declare their key bindings.
 """
+
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Tuple
 
@@ -27,7 +28,9 @@ class Keymap:
     bindings: List[KeyBinding] = field(default_factory=list)
 
     def register(self, view: str, key: str, handler: KeyHandler, description: str = "") -> None:
-        self.bindings.append(KeyBinding(view=view, key=key, handler=handler, description=description))
+        self.bindings.append(
+            KeyBinding(view=view, key=key, handler=handler, description=description)
+        )
 
     def register_global(self, key: str, handler: KeyHandler, description: str = "") -> None:
         self.register(view="*", key=key, handler=handler, description=description)
