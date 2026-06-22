@@ -79,10 +79,10 @@ try:
         os.system("")
 
     def get_key_nonblocking() -> Optional[str]:
-        if msvcrt.kbhit():
-            ch = msvcrt.getch()
+        if msvcrt.kbhit():  # type: ignore[attr-defined]
+            ch = msvcrt.getch()  # type: ignore[attr-defined]
             if ch in (b"\x00", b"\xe0"):
-                ch2 = msvcrt.getch()
+                ch2 = msvcrt.getch()  # type: ignore[attr-defined]
                 if ch2 == b"H":
                     return "up"
                 if ch2 == b"P":
@@ -440,8 +440,8 @@ class ContainerDashboard:
         print(f"\r\033[K{YELLOW}{BOLD}{prompt_text}{RESET}", end="", flush=True)
         try:
             if PLATFORM == "windows":
-                while msvcrt.kbhit():
-                    msvcrt.getch()
+                while msvcrt.kbhit():  # type: ignore[attr-defined]
+                    msvcrt.getch()  # type: ignore[attr-defined]
             return input().strip()
         except Exception:
             return ""
