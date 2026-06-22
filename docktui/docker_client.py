@@ -232,7 +232,9 @@ class DockerClient:
         if not self.is_docker_installed():
             return False
         try:
-            res = self._run([str(self.docker_bin), "info"], capture_output=True, text=True, check=False)
+            res = self._run(
+                [str(self.docker_bin), "info"], capture_output=True, text=True, check=False
+            )
             return res.returncode == 0
         except (subprocess.TimeoutExpired, Exception):
             return False
@@ -319,13 +321,17 @@ class DockerClient:
         return self._bool([str(self.docker_bin), "stop", container_id], f"stop {container_id}")[0]
 
     def restart_container(self, container_id: str) -> bool:
-        return self._bool([str(self.docker_bin), "restart", container_id], f"restart {container_id}")[0]
+        return self._bool(
+            [str(self.docker_bin), "restart", container_id], f"restart {container_id}"
+        )[0]
 
     def pause_container(self, container_id: str) -> bool:
         return self._bool([str(self.docker_bin), "pause", container_id], f"pause {container_id}")[0]
 
     def unpause_container(self, container_id: str) -> bool:
-        return self._bool([str(self.docker_bin), "unpause", container_id], f"unpause {container_id}")[0]
+        return self._bool(
+            [str(self.docker_bin), "unpause", container_id], f"unpause {container_id}"
+        )[0]
 
     def top_container(self, container_id: str) -> str:
         if not self.is_docker_installed():
@@ -337,7 +343,8 @@ class DockerClient:
 
     def rename_container(self, container_id: str, new_name: str) -> Tuple[bool, str]:
         success, err = self._bool(
-            [str(self.docker_bin), "rename", container_id, new_name], f"rename container to {new_name}"
+            [str(self.docker_bin), "rename", container_id, new_name],
+            f"rename container to {new_name}",
         )
         if success:
             return True, f"Successfully renamed container to {new_name}."
@@ -561,7 +568,9 @@ class DockerClient:
     def prune_volumes(self) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        out = self._capture([str(self.docker_bin), "volume", "prune", "-f"], action="pruning volumes")
+        out = self._capture(
+            [str(self.docker_bin), "volume", "prune", "-f"], action="pruning volumes"
+        )
         return out or "Volume prune completed with no output."
 
     # ------------------------------------------------------------------ images
@@ -569,7 +578,12 @@ class DockerClient:
     def list_images(self) -> List[Dict[str, str]]:
         if not self.is_docker_installed():
             return []
-        cmd = [str(self.docker_bin), "images", "--format", "{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}"]
+        cmd = [
+            str(self.docker_bin),
+            "images",
+            "--format",
+            "{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}",
+        ]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -890,7 +904,9 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         try:
-            cmd_parts = shlex.split(command, posix=(os.name != "nt"))
+            if os.name == "nt":
+                command = command.replace("\\", "\\\\")
+            cmd_parts = shlex.split(command, posix=True)
         except ValueError as e:
             return f"Invalid command: {e}"
         if not cmd_parts:
