@@ -1983,7 +1983,7 @@ class ContainerDashboard:
         print(f"Command: {command}")
         print("Type 'exit' to end session and return to DockTUI.\n")
         try:
-            cmd_parts = shlex.split(command)
+            cmd_parts = shlex.split(command, posix=(os.name != "nt"))
         except ValueError as e:
             print(f"Error parsing command: {e}")
             self.start_refresh_worker()

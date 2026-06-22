@@ -890,7 +890,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         try:
-            cmd_parts = shlex.split(command)
+            cmd_parts = shlex.split(command, posix=(os.name != "nt"))
         except ValueError as e:
             return f"Invalid command: {e}"
         if not cmd_parts:
