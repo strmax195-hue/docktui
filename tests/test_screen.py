@@ -61,6 +61,7 @@ class TestScreen(unittest.TestCase):
     def test_draw_frame_does_not_raise_with_safe_string(self):
         # Pure ASCII title to avoid Windows console encoding issues.
         from unittest.mock import patch
+
         apply_theme_colors("dark")
         with patch("builtins.print"):
             draw_frame("Title", 80)

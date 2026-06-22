@@ -232,7 +232,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return False
         try:
-            res = self._run([self.docker_bin, "info"], capture_output=True, text=True, check=False)
+            res = self._run([str(self.docker_bin), "info"], capture_output=True, text=True, check=False)
             return res.returncode == 0
         except (subprocess.TimeoutExpired, Exception):
             return False
@@ -244,12 +244,15 @@ class DockerClient:
             return []
 
         cmd = [
-            self.docker_bin, "ps", "-a",
-            "--format", "{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Image}}|{{.Labels}}|{{.Ports}}|{{.CreatedAt}}",
+            self.docker_bin,
+            "ps",
+            "-a",
+            "--format",
+            "{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Image}}|{{.Labels}}|{{.Ports}}|{{.CreatedAt}}",
         ]
 
         try:
-            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
 
@@ -261,18 +264,20 @@ class DockerClient:
             if len(parts) < 5:
                 continue
             labels = self._parse_labels(parts[5] if len(parts) > 5 else "")
-            containers.append({
-                "id": parts[0],
-                "name": parts[1],
-                "state": parts[2],
-                "status": parts[3],
-                "image": parts[4],
-                "labels": labels,
-                "compose_project": labels.get("com.docker.compose.project", ""),
-                "compose_service": labels.get("com.docker.compose.service", ""),
-                "ports": parts[6] if len(parts) > 6 else "",
-                "created": parts[7] if len(parts) > 7 else "",
-            })
+            containers.append(
+                {
+                    "id": parts[0],
+                    "name": parts[1],
+                    "state": parts[2],
+                    "status": parts[3],
+                    "image": parts[4],
+                    "labels": labels,  # type: ignore
+                    "compose_project": labels.get("com.docker.compose.project", ""),
+                    "compose_service": labels.get("com.docker.compose.service", ""),
+                    "ports": parts[6] if len(parts) > 6 else "",
+                    "created": parts[7] if len(parts) > 7 else "",
+                }
+            )
         return containers
 
     def get_container_stats(self) -> Dict[str, Dict[str, str]]:
@@ -280,12 +285,15 @@ class DockerClient:
             return {}
 
         cmd = [
-            self.docker_bin, "stats", "--no-stream",
-            "--format", "{{.Container}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}",
+            self.docker_bin,
+            "stats",
+            "--no-stream",
+            "--format",
+            "{{.Container}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}",
         ]
 
         try:
-            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return {}
 
@@ -305,28 +313,32 @@ class DockerClient:
         return stats
 
     def start_container(self, container_id: str) -> bool:
-        return self._bool([self.docker_bin, "start", container_id], f"start {container_id}")[0]
+        return self._bool([str(self.docker_bin), "start", container_id], f"start {container_id}")[0]
 
     def stop_container(self, container_id: str) -> bool:
-        return self._bool([self.docker_bin, "stop", container_id], f"stop {container_id}")[0]
+        return self._bool([str(self.docker_bin), "stop", container_id], f"stop {container_id}")[0]
 
     def restart_container(self, container_id: str) -> bool:
-        return self._bool([self.docker_bin, "restart", container_id], f"restart {container_id}")[0]
+        return self._bool([str(self.docker_bin), "restart", container_id], f"restart {container_id}")[0]
 
     def pause_container(self, container_id: str) -> bool:
-        return self._bool([self.docker_bin, "pause", container_id], f"pause {container_id}")[0]
+        return self._bool([str(self.docker_bin), "pause", container_id], f"pause {container_id}")[0]
 
     def unpause_container(self, container_id: str) -> bool:
-        return self._bool([self.docker_bin, "unpause", container_id], f"unpause {container_id}")[0]
+        return self._bool([str(self.docker_bin), "unpause", container_id], f"unpause {container_id}")[0]
 
     def top_container(self, container_id: str) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        out = self._capture([self.docker_bin, "top", container_id], action="reading container processes")
+        out = self._capture(
+            [str(self.docker_bin), "top", container_id], action="reading container processes"
+        )
         return out or "No process data."
 
     def rename_container(self, container_id: str, new_name: str) -> Tuple[bool, str]:
-        success, err = self._bool([self.docker_bin, "rename", container_id, new_name], f"rename container to {new_name}")
+        success, err = self._bool(
+            [str(self.docker_bin), "rename", container_id, new_name], f"rename container to {new_name}"
+        )
         if success:
             return True, f"Successfully renamed container to {new_name}."
         return False, err or f"Failed to rename container to {new_name}."
@@ -342,7 +354,7 @@ class DockerClient:
             return False, "Docker not installed."
         if cpus is None and memory_bytes is None:
             return False, "No resource changes specified."
-        cmd = [self.docker_bin, "update"]
+        cmd = [str(self.docker_bin), "update"]
         if cpus is not None:
             cmd += [f"--cpus={cpus}"]
         if memory_bytes is not None:
@@ -369,7 +381,7 @@ class DockerClient:
             return False, "Docker not installed."
         if not new_name.strip():
             return False, "Container name is required."
-        cmd = [self.docker_bin, "run"]
+        cmd = [str(self.docker_bin), "run"]
         if detach:
             cmd.append("-d")
         cmd += ["--name", new_name]
@@ -394,8 +406,11 @@ class DockerClient:
             return ""
         try:
             res = self._run(
-                [self.docker_bin, "context", "show"],
-                capture_output=True, text=True, check=False, encoding="utf-8",
+                [str(self.docker_bin), "context", "show"],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8",
             )
             return (res.stdout or "").strip()
         except (subprocess.TimeoutExpired, Exception):
@@ -405,11 +420,14 @@ class DockerClient:
         if not self.is_docker_installed():
             return []
         cmd = [
-            self.docker_bin, "context", "ls",
-            "--format", "{{.Name}}|{{.Current}}|{{.Description}}|{{.DockerEndpoint}}",
+            self.docker_bin,
+            "context",
+            "ls",
+            "--format",
+            "{{.Name}}|{{.Current}}|{{.Description}}|{{.DockerEndpoint}}",
         ]
         try:
-            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
         contexts: List[Dict[str, str]] = []
@@ -419,19 +437,21 @@ class DockerClient:
             parts = line.split("|")
             if len(parts) < 4:
                 continue
-            contexts.append({
-                "name": parts[0],
-                "current": parts[1],
-                "description": parts[2],
-                "endpoint": parts[3],
-            })
+            contexts.append(
+                {
+                    "name": parts[0],
+                    "current": parts[1],
+                    "description": parts[2],
+                    "endpoint": parts[3],
+                }
+            )
         return contexts
 
     def use_context(self, context_name: str) -> Tuple[bool, str]:
         if not self.is_docker_installed():
             return False, "Docker not installed."
         success, msg = self._run_capture(
-            [self.docker_bin, "context", "use", context_name],
+            [str(self.docker_bin), "context", "use", context_name],
             action=f"switching Docker context to {context_name}",
         )
         if not success:
@@ -441,7 +461,7 @@ class DockerClient:
     def create_context(self, name: str, host: str, description: str = "") -> Tuple[bool, str]:
         if not self.is_docker_installed():
             return False, "Docker not installed."
-        cmd = [self.docker_bin, "context", "create", name, "--docker", f"host={host}"]
+        cmd = [str(self.docker_bin), "context", "create", name, "--docker", f"host={host}"]
         if description:
             cmd += ["--description", description]
         success, msg = self._run_capture(cmd, action=f"creating context {name}")
@@ -453,7 +473,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return False, "Docker not installed."
         success, msg = self._run_capture(
-            [self.docker_bin, "context", "rm", name],
+            [str(self.docker_bin), "context", "rm", name],
             action=f"removing context {name}",
         )
         if not success:
@@ -465,8 +485,11 @@ class DockerClient:
             return {}
         try:
             res = self._run(
-                [self.docker_bin, "context", "inspect", name],
-                capture_output=True, text=True, check=True, encoding="utf-8",
+                [str(self.docker_bin), "context", "inspect", name],
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding="utf-8",
             )
             data = json.loads(res.stdout)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
@@ -475,7 +498,7 @@ class DockerClient:
             return {}
         entry = data[0] or {}
         endpoints = entry.get("Endpoints") or {}
-        docker_endpoint = (endpoints.get("docker") or {})
+        docker_endpoint = endpoints.get("docker") or {}
         return {
             "name": entry.get("Name", name),
             "description": entry.get("Description", "") or "",
@@ -489,7 +512,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         out = self._capture(
-            [self.docker_bin, "logs", f"--tail={tail}", container_id],
+            [str(self.docker_bin), "logs", f"--tail={tail}", container_id],
             action="reading logs",
         )
         return out or "(no logs available)"
@@ -498,7 +521,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         out = self._capture(
-            [self.docker_bin, "compose", "-p", project_name, "logs", f"--tail={tail}"],
+            [str(self.docker_bin), "compose", "-p", project_name, "logs", f"--tail={tail}"],
             action="reading Compose logs",
         )
         return out or "(no logs available)"
@@ -507,7 +530,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         out = self._capture(
-            [self.docker_bin, "inspect", container_id],
+            [str(self.docker_bin), "inspect", container_id],
             action="inspecting container",
         )
         return out or "No inspect data."
@@ -517,13 +540,13 @@ class DockerClient:
     def get_disk_usage(self) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        out = self._capture([self.docker_bin, "system", "df"], action="reading disk usage")
+        out = self._capture([str(self.docker_bin), "system", "df"], action="reading disk usage")
         return out or "No disk usage data."
 
     def prune_system(self, include_volumes: bool = False) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        cmd = [self.docker_bin, "system", "prune", "-f"]
+        cmd = [str(self.docker_bin), "system", "prune", "-f"]
         if include_volumes:
             cmd.append("--volumes")
         out = self._capture(cmd, action="running prune")
@@ -532,13 +555,13 @@ class DockerClient:
     def prune_images(self) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        out = self._capture([self.docker_bin, "image", "prune", "-f"], action="pruning images")
+        out = self._capture([str(self.docker_bin), "image", "prune", "-f"], action="pruning images")
         return out or "Image prune completed with no output."
 
     def prune_volumes(self) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        out = self._capture([self.docker_bin, "volume", "prune", "-f"], action="pruning volumes")
+        out = self._capture([str(self.docker_bin), "volume", "prune", "-f"], action="pruning volumes")
         return out or "Volume prune completed with no output."
 
     # ------------------------------------------------------------------ images
@@ -546,7 +569,7 @@ class DockerClient:
     def list_images(self) -> List[Dict[str, str]]:
         if not self.is_docker_installed():
             return []
-        cmd = [self.docker_bin, "images", "--format", "{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}"]
+        cmd = [str(self.docker_bin), "images", "--format", "{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}"]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -558,17 +581,19 @@ class DockerClient:
             parts = line.split("|")
             if len(parts) < 4:
                 continue
-            images.append({
-                "id": parts[0],
-                "repository": parts[1],
-                "tag": parts[2],
-                "size": parts[3],
-            })
+            images.append(
+                {
+                    "id": parts[0],
+                    "repository": parts[1],
+                    "tag": parts[2],
+                    "size": parts[3],
+                }
+            )
         return images
 
     def remove_image(self, image_id: str) -> Tuple[bool, str]:
         success, msg = self._run_capture(
-            [self.docker_bin, "rmi", image_id],
+            [str(self.docker_bin), "rmi", image_id],
             action=f"removing image {image_id}",
         )
         if success:
@@ -582,10 +607,17 @@ class DockerClient:
         query = (query or "").strip()
         if not query:
             return []
-        cmd = [self.docker_bin, "search", "--limit", str(limit), query, "--format",
-               "{{.Name}}|{{.Description}}|{{.StarCount}}|{{.IsOfficial}}|{{.IsAutomated}}"]
+        cmd = [
+            self.docker_bin,
+            "search",
+            "--limit",
+            str(limit),
+            query,
+            "--format",
+            "{{.Name}}|{{.Description}}|{{.StarCount}}|{{.IsOfficial}}|{{.IsAutomated}}",
+        ]
         try:
-            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
         results: List[Dict[str, str]] = []
@@ -595,20 +627,22 @@ class DockerClient:
             parts = line.split("|")
             if len(parts) < 2:
                 continue
-            results.append({
-                "name": parts[0],
-                "description": parts[1],
-                "stars": parts[2] if len(parts) > 2 else "0",
-                "official": parts[3] if len(parts) > 3 else "",
-                "automated": parts[4] if len(parts) > 4 else "",
-            })
+            results.append(
+                {
+                    "name": parts[0],
+                    "description": parts[1],
+                    "stars": parts[2] if len(parts) > 2 else "0",
+                    "official": parts[3] if len(parts) > 3 else "",
+                    "automated": parts[4] if len(parts) > 4 else "",
+                }
+            )
         return results
 
     def pull_image_args(self, repository: str) -> List[str]:
         """Return the command used to pull `repository` (used by `LineStreamer`)."""
         if not self.is_docker_installed():
             return []
-        return [self.docker_bin, "pull", repository]
+        return [str(self.docker_bin), "pull", repository]
 
     def pull_image(self, repository: str, on_progress=None) -> "subprocess.Popen":
         """Start a background `docker pull` process and return the handle.
@@ -634,7 +668,7 @@ class DockerClient:
     def list_volumes(self) -> List[Dict[str, str]]:
         if not self.is_docker_installed():
             return []
-        cmd = [self.docker_bin, "volume", "ls", "--format", "{{.Name}}|{{.Driver}}|{{.Scope}}"]
+        cmd = [str(self.docker_bin), "volume", "ls", "--format", "{{.Name}}|{{.Driver}}|{{.Scope}}"]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -646,16 +680,18 @@ class DockerClient:
             parts = line.split("|")
             if len(parts) < 3:
                 continue
-            volumes.append({
-                "name": parts[0],
-                "driver": parts[1],
-                "scope": parts[2],
-            })
+            volumes.append(
+                {
+                    "name": parts[0],
+                    "driver": parts[1],
+                    "scope": parts[2],
+                }
+            )
         return volumes
 
     def remove_volume(self, volume_name: str) -> Tuple[bool, str]:
         success, msg = self._run_capture(
-            [self.docker_bin, "volume", "rm", volume_name],
+            [str(self.docker_bin), "volume", "rm", volume_name],
             action=f"removing volume {volume_name}",
         )
         if success:
@@ -667,8 +703,11 @@ class DockerClient:
             return {}
         try:
             res = self._run(
-                [self.docker_bin, "volume", "inspect", name],
-                capture_output=True, text=True, check=True, encoding="utf-8",
+                [str(self.docker_bin), "volume", "inspect", name],
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding="utf-8",
             )
             data = json.loads(res.stdout)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
@@ -693,13 +732,18 @@ class DockerClient:
             return []
         target = path if path.startswith("/") else "/" + path
         cmd = [
-            self.docker_bin, "run", "--rm",
-            "-v", f"{name}:/data:ro",
+            self.docker_bin,
+            "run",
+            "--rm",
+            "-v",
+            f"{name}:/data:ro",
             "alpine:latest",
-            "ls", "-la", f"/data{target}",
+            "ls",
+            "-la",
+            f"/data{target}",
         ]
         try:
-            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
         entries: List[Dict[str, str]] = []
@@ -710,15 +754,17 @@ class DockerClient:
             parts = line.split(None, 8)
             if len(parts) < 9:
                 continue
-            entries.append({
-                "mode": parts[0],
-                "links": parts[1],
-                "owner": parts[2],
-                "group": parts[3],
-                "size": parts[4],
-                "mtime": " ".join(parts[5:8]),
-                "name": parts[8],
-            })
+            entries.append(
+                {
+                    "mode": parts[0],
+                    "links": parts[1],
+                    "owner": parts[2],
+                    "group": parts[3],
+                    "size": parts[4],
+                    "mtime": " ".join(parts[5:8]),
+                    "name": parts[8],
+                }
+            )
         return entries
 
     # ------------------------------------------------------------------ networks
@@ -726,9 +772,15 @@ class DockerClient:
     def list_networks(self) -> List[Dict[str, str]]:
         if not self.is_docker_installed():
             return []
-        cmd = [self.docker_bin, "network", "ls", "--format", "{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}"]
+        cmd = [
+            self.docker_bin,
+            "network",
+            "ls",
+            "--format",
+            "{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}",
+        ]
         try:
-            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
+            res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
         networks: List[Dict[str, str]] = []
@@ -738,17 +790,19 @@ class DockerClient:
             parts = line.split("|")
             if len(parts) < 4:
                 continue
-            networks.append({
-                "id": parts[0],
-                "name": parts[1],
-                "driver": parts[2],
-                "scope": parts[3],
-            })
+            networks.append(
+                {
+                    "id": parts[0],
+                    "name": parts[1],
+                    "driver": parts[2],
+                    "scope": parts[3],
+                }
+            )
         return networks
 
     def remove_network(self, network_name: str) -> Tuple[bool, str]:
         success, msg = self._run_capture(
-            [self.docker_bin, "network", "rm", network_name],
+            [str(self.docker_bin), "network", "rm", network_name],
             action=f"removing network {network_name}",
         )
         if success:
@@ -842,7 +896,7 @@ class DockerClient:
         if not cmd_parts:
             return "Empty command."
 
-        cmd = [self.docker_bin, "exec", container_id] + cmd_parts
+        cmd = [str(self.docker_bin), "exec", container_id] + cmd_parts
         out = self._capture(cmd, action="executing command")
         return out or "(Command executed with no output)"
 
@@ -850,7 +904,7 @@ class DockerClient:
         if not self.is_docker_installed():
             return False, "Docker not installed."
 
-        cmd = [self.docker_bin]
+        cmd = [str(self.docker_bin)]
         if config_file:
             files = [f.strip() for f in config_file.split(",") if f.strip()]
             for f in files:

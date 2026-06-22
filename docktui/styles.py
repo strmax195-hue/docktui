@@ -3,6 +3,7 @@
 This module owns every color code used by the TUI. `apply_theme_colors` mutates
 the module-level globals below, and the rest of the application reads them.
 """
+
 import os
 from typing import Optional
 
@@ -33,7 +34,11 @@ def _normalize_theme(theme_name: Optional[str]) -> str:
     if not theme_name:
         return DEFAULT_THEME
     candidate = _LEGACY_THEME_ALIASES.get(theme_name, theme_name)
-    if candidate not in (ThemeName.DARK.value, ThemeName.LIGHT.value, ThemeName.HIGH_CONTRAST.value):
+    if candidate not in (
+        ThemeName.DARK.value,
+        ThemeName.LIGHT.value,
+        ThemeName.HIGH_CONTRAST.value,
+    ):
         return DEFAULT_THEME
     return candidate
 
@@ -95,12 +100,14 @@ def apply_theme_colors(theme_name: Optional[str] = None) -> str:
 def visible_length(text: str) -> int:
     """Return the printed length of `text` ignoring ANSI escape sequences."""
     import re
+
     return len(re.sub(r"\033\[[0-9;]*m", "", text))
 
 
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape sequences from `text`."""
     import re
+
     return re.sub(r"\033\[[0-9;]*m", "", text)
 
 

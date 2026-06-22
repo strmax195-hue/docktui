@@ -6,6 +6,7 @@ from docktui.dialogs import DialogResult, PickerOption, apply_dialog_key
 def _capture(value: list) -> "callable":
     def cb(_value: str) -> None:
         value.append(_value)
+
     return cb
 
 

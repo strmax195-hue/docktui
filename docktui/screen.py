@@ -4,6 +4,7 @@ The legacy TUI open-coded the title/footer frame, screen clearing, terminal size
 lookup and viewport scrolling in every `draw_*` method. This module centralizes
 those concerns so views can stay focused on their data.
 """
+
 import shutil
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple

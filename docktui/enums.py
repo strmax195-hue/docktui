@@ -1,4 +1,5 @@
 """Enum-style constants for view modes and other stringly-typed states."""
+
 from enum import Enum
 
 
