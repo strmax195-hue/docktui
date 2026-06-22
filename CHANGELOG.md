@@ -2,6 +2,13 @@
 
 All notable changes to DockTUI are documented here.
 
+## [Unreleased]
+### Changed
+- Configured Dependabot for Python (`pip`) and GitHub Actions.
+- Formatted entire codebase to standard guidelines using `ruff`.
+- Fixed 51 MyPy typing issues, largely around `subprocess` interactions with Docker CLI.
+- Enabled Git branch protection.
+
 ## [1.4.0] - 2026-06-15
 
 ### Added
