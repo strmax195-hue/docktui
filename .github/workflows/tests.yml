@@ -25,11 +25,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install package
-        run: python -m pip install -e .
+      - name: Install package and test dependencies
+        run: python -m pip install -e .[dev]
 
-      - name: Run unit tests
-        run: python -m unittest discover tests
+      - name: Run unit tests with pytest
+        run: pytest --cov=docktui tests/
 
   lint:
     name: Ruff lint
@@ -43,8 +43,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ruff
-        run: python -m pip install "ruff>=0.5.0"
+      - name: Install linters
+        run: python -m pip install "ruff>=0.5.0" "mypy>=1.10.0" types-requests
 
-      - name: Run ruff
+      - name: Run ruff check
         run: ruff check .
+
+      - name: Run ruff format check
+        run: ruff format --check .
+
+      - name: Run mypy
+        run: mypy docktui
