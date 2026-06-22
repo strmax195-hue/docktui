@@ -3,11 +3,20 @@
 All notable changes to DockTUI are documented here.
 
 ## [Unreleased]
+### Added
+- Added CodeQL Static Application Security Testing (SAST) to GitHub Actions.
+- Added a `typecheck` job to GitHub Actions to enforce `mypy`.
+- Added a `pre-commit-config.yaml` to enforce `ruff` and `mypy` locally.
+
 ### Changed
 - Configured Dependabot for Python (`pip`) and GitHub Actions.
+- Upgraded the CI test runner to use `pytest --cov` for test coverage reporting.
 - Formatted entire codebase to standard guidelines using `ruff`.
 - Fixed 51 MyPy typing issues, largely around `subprocess` interactions with Docker CLI.
 - Enabled Git branch protection.
+
+### Fixed
+- **Windows Paths:** Fixed a critical functional bug where `shlex.split` dropped backslashes on Windows during interactive `docker exec` sessions.
 
 ## [1.4.0] - 2026-06-15
 
