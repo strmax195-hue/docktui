@@ -1,52 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
-  <title id="title">DockTUI social preview</title>
-  <desc id="desc">DockTUI: Docker dashboard and health checks for your terminal, next to a real screenshot of the dashboard with pinned live logs.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0b1220"/>
-      <stop offset="1" stop-color="#02040a"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.78" cy="0.45" r="0.55">
-      <stop offset="0" stop-color="#1f6feb" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#1f6feb" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
-      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity="0.6"/>
-    </filter>
-  </defs>
-  <rect width="1280" height="640" fill="url(#bg)"/>
-  <rect width="1280" height="640" fill="url(#glow)"/>
-
-  <g transform="translate(64 150)">
-    <g transform="scale(0.62)">
-      <rect x="0" y="0" width="136" height="136" rx="30" fill="#0d1117"/>
-      <rect x="6" y="6" width="124" height="124" rx="25" fill="#161b22" stroke="#39c5cf" stroke-width="4"/>
-      <circle cx="28" cy="28" r="5" fill="#ff5f56"/>
-      <circle cx="44" cy="28" r="5" fill="#ffbd2e"/>
-      <circle cx="60" cy="28" r="5" fill="#27c93f"/>
-      <rect x="30" y="50" width="76" height="46" rx="7" fill="#e6edf3"/>
-      <rect x="38" y="58" width="14" height="24" rx="2.5" fill="#1f6feb"/>
-      <rect x="57" y="58" width="14" height="24" rx="2.5" fill="#1f6feb"/>
-      <rect x="76" y="58" width="14" height="24" rx="2.5" fill="#3fb950"/>
-      <path d="M30 108h76" stroke="#39c5cf" stroke-width="5" stroke-linecap="round"/>
-    </g>
-    <text x="104" y="62" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="68" font-weight="800" fill="#f0f6fc">DockTUI</text>
-    <text x="0" y="150" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="30" font-weight="600" fill="#e6edf3">The Docker dashboard for people</text>
-    <text x="0" y="190" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="30" font-weight="600" fill="#e6edf3">who live in SSH sessions.</text>
-    <text x="0" y="238" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" fill="#9198a1">Terminal UI + Nagios-style health checks.</text>
-    <text x="0" y="266" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" fill="#9198a1">Pure Python, zero dependencies.</text>
-    <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="17" font-weight="700">
-      <rect x="0" y="302" width="160" height="34" rx="17" fill="#3fb950" fill-opacity="0.15" stroke="#3fb950" stroke-opacity="0.5"/>
-      <text x="80" y="325" text-anchor="middle" fill="#56d364">docktui check</text>
-      <rect x="172" y="302" width="168" height="34" rx="17" fill="#1f6feb" fill-opacity="0.18" stroke="#58a6ff" stroke-opacity="0.5"/>
-      <text x="256" y="325" text-anchor="middle" fill="#79c0ff">docktui status</text>
-      <rect x="352" y="302" width="168" height="34" rx="17" fill="#d29922" fill-opacity="0.15" stroke="#d29922" stroke-opacity="0.5"/>
-      <text x="436" y="325" text-anchor="middle" fill="#e3b341">docktui doctor</text>
-    </g>
-  </g>
-
-  <g transform="translate(640 70) scale(0.7400)" filter="url(#shadow)">
-    <svg width="1027" height="916" viewBox="0 0 1027 916">
+<svg xmlns="http://www.w3.org/2000/svg" width="1027" height="916" viewBox="0 0 1027 916" role="img" aria-label="docktui — containers with pinned live logs">
 <title>docktui — containers with pinned live logs</title>
 <rect width="1027" height="916" rx="10" fill="#0d1117"/>
 <rect x="0.5" y="0.5" width="1026" height="915" rx="10" fill="none" stroke="#30363d"/>
@@ -121,5 +73,3 @@
 <text x="18.0" y="875.5" fill="#c9d1d9" textLength="487.2" lengthAdjust="spacingAndGlyphs">2026-09-24T16:59:04+00:00 INFO  GET /api/products 200 25ms</text>
 <text x="18.0" y="893.5" fill="#c9d1d9" textLength="487.2" lengthAdjust="spacingAndGlyphs">2026-09-24T16:59:05+00:00 INFO  GET /api/products 200 26ms</text>
 </g></svg>
-  </g>
-</svg>

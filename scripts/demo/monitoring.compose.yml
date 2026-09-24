@@ -1,0 +1,9 @@
+name: monitoring
+services:
+  grafana:
+    image: grafana/grafana:11.2
+    command: sleep 100000
+    healthcheck: {test: ["CMD", "true"], interval: 2s}
+  prometheus:
+    image: prom/prometheus:v2.54
+    command: sh -c 'while true; do :; done'

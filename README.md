@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="DockTUI" width="660">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" alt="DockTUI" width="640">
+  </picture>
 </p>
 
 <p align="center">
@@ -18,15 +21,15 @@
 
 **DockTUI** is a fast terminal dashboard for monitoring, debugging and managing Docker containers, Compose stacks, images, volumes and networks. It is pure Python standard library, drives the regular `docker` CLI, and therefore works anywhere Docker works: your laptop, a jump host, a production box over SSH, or a remote daemon via `DOCKER_HOST`.
 
+<p align="center">
+  <img src="assets/screenshot-dashboard.svg" alt="DockTUI dashboard: container list with health status and resource usage, live logs of shop-web-1 pinned underneath" width="100%">
+</p>
+
 It is also a **non-interactive tool for ops**: `docktui status` prints a snapshot, `docktui check` is a ready-made Nagios/Icinga/Zabbix/cron health check with proper exit codes, and `docktui doctor` tells you exactly why Docker isn't working.
 
-```text
-$ docktui check
-DOCKTUI CRITICAL - 2 critical, 1 warning | containers=14 running=12 exited=1 restarting=1 unhealthy=1
-[CRITICAL] billing-worker: restart loop (last exit code 1)
-[CRITICAL] shop-api-1: healthcheck reports unhealthy
-[WARNING] search-indexer: memory 93.4% >= 90%
-```
+<p align="center">
+  <img src="assets/screenshot-cli.svg" alt="docktui status and docktui check output in a shell" width="100%">
+</p>
 
 ---
 
@@ -139,21 +142,9 @@ docker compose up -d && sleep 20 && docktui check --filter myproject --require '
 
 ### `docktui doctor` — "why doesn't it work?"
 
-```text
-$ docktui doctor
-DockTUI 1.5.0 doctor
-
-[ OK ] Python          3.12.3 (Linux x86_64)
-[ OK ] Docker CLI      27.3.1 at /usr/bin/docker
-[FAIL] Docker daemon   permission denied while trying to connect to the Docker daemon socket
-                       -> Add your user to the `docker` group: `sudo usermod -aG docker $USER`, then re-login.
-[ OK ] Endpoint        context `default`
-[ OK ] Docker Compose  plugin 2.29.7
-[ OK ] Config file     none (defaults); create one with `docktui config init`
-[ OK ] Terminal        160x48, colors enabled
-
-1 problem(s) found, 0 warning(s).
-```
+<p align="center">
+  <img src="assets/screenshot-doctor.svg" alt="docktui doctor output listing environment checks" width="100%">
+</p>
 
 It also warns about unencrypted `tcp://…:2375` endpoints, a missing `ssh` client for `ssh://` hosts, broken config JSON and too-small terminals. Exit code is `1` if anything failed.
 
@@ -166,6 +157,10 @@ docktui config show    # effective configuration as JSON (after CLI overrides)
 ```
 
 ## Dashboard features
+
+<p align="center">
+  <img src="assets/screenshot-compose.svg" alt="Compose tab grouping containers by project and service" width="100%">
+</p>
 
 | Area | What you get |
 | --- | --- |
@@ -377,6 +372,8 @@ pytest                    # unit tests; no Docker daemon required (subprocess is
 ruff check . && ruff format --check .
 mypy
 ```
+
+The screenshots in this README are generated from the real UI: `scripts/demo/up.sh` starts a demo environment and `python scripts/screenshots.py` (needs `pip install pyte`) re-renders `assets/screenshot-*.svg`.
 
 CI runs the tests on Linux, macOS and Windows with Python 3.9–3.14, lint and type checks, CodeQL, and an integration job that exercises `status`/`check`/`doctor` against a real Docker daemon.
 

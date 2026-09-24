@@ -14,7 +14,10 @@ A release focused on people who run Docker hosts: scriptable health checks, diag
 - `-c/--config PATH`, `$DOCKTUI_CONFIG` and `$XDG_CONFIG_HOME` support; the settings editor now saves back to the file the config was loaded from.
 - `--no-color` flag (same as `NO_COLOR=1`) and `-V` short version flag.
 - Dashboard lists (containers, Compose, images, volumes, networks, contexts) now scroll and keep the selection visible, with a `[rows X-Y of N]` indicator — usable on hosts with hundreds of containers.
-- Unhealthy and restarting containers are highlighted in the Containers tab.
+- Unhealthy and restarting containers are highlighted in the Containers tab; container states are coloured in the Compose tab too.
+- Log lines are coloured by severity (`ERROR`/`FATAL` red, `WARN` yellow, also `level=…` logfmt).
+- `docktui status` fits the table to the terminal width instead of wrapping.
+- README screenshots are generated from the real UI (`scripts/screenshots.py` + `scripts/demo/`), with a dark-mode logo variant and a new social preview image.
 - `poll_intervals` config block (documented previously, but it was silently ignored).
 - `py.typed` marker, `Typing :: Typed` and sysadmin classifiers; CI integration job against a real Docker daemon; CLI smoke tests; release workflow attaches the wheel and sdist to the GitHub release and checks the tag matches the package version.
 
@@ -24,6 +27,9 @@ A release focused on people who run Docker hosts: scriptable health checks, diag
 - **Bulk start/stop (`Ctrl+S`)**, **custom hotkeys (`hotkey_overlays`)** and **pinned panes (`P` in Logs/Details)** were listed in the 1.4.0 notes but were not wired into the dashboard. They are now implemented and tested; bulk actions ask for confirmation and run as a single `docker stop|start` call.
 - Background exec output was not split into lines (`"\\n"` literal), and the input prompt printed a literal `\n`.
 - The STATE column in the Containers tab was misaligned when colors were enabled.
+- **Theme switching (`M`, `--theme`) and `NO_COLOR`/`--no-color` had no effect in the dashboard**: colour codes were copied at import time. They are now re-bound whenever a theme is applied.
+- **Log highlight patterns (`H`) were compiled but never rendered**, and lost their case-insensitive flag. Matches are now shown in bold magenta.
+- The key-hint footer wrapped in the middle of words on narrow terminals; it now wraps between hints, and wrong hints (`[Shift+F] Files` on the Compose tab) were corrected.
 - `__version__` reported `1.3.0` while the package was `1.4.0`; the version now has a single source (`docktui/__init__.py`).
 - A config file with `"theme": "high-contrast"` or a non-numeric value no longer resets or crashes the CLI.
 - Removed the misleading `pip install docktui` instruction (the package is not on PyPI yet) and a broken "Lint" badge.
