@@ -5,13 +5,11 @@ are grouped here so that `Config` validation, `cli.py` argparse defaults
 and the TUI share a single source of truth.
 """
 
-from typing import Tuple
-
 #: Available color theme presets (used by `argparse` choices and theme cycle order).
-AVAILABLE_THEMES: Tuple[str, ...] = ("dark", "light", "high_contrast")
+AVAILABLE_THEMES: tuple[str, ...] = ("dark", "light", "high_contrast")
 
 #: Ordered list of top-level tabs shown in the dashboard.
-AVAILABLE_TABS: Tuple[str, ...] = (
+AVAILABLE_TABS: tuple[str, ...] = (
     "containers",
     "compose",
     "images",
@@ -57,7 +55,7 @@ DEFAULT_SCROLL_DELTA: int = 1
 DEFAULT_SCROLL_DELTA_WHEEL: int = 3
 
 #: Default exec command presets shown in the exec picker.
-DEFAULT_EXEC_PRESETS: Tuple[str, ...] = (
+DEFAULT_EXEC_PRESETS: tuple[str, ...] = (
     "sh",
     "bash",
     "env",

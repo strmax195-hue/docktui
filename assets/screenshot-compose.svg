@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1027" height="520" viewBox="0 0 1027 520" role="img" aria-label="docktui — Compose projects">
+<title>docktui — Compose projects</title>
+<rect width="1027" height="520" rx="10" fill="#0d1117"/>
+<rect x="0.5" y="0.5" width="1026" height="519" rx="10" fill="none" stroke="#30363d"/>
+<path d="M0 34H1027" stroke="#30363d"/>
+<circle cx="20" cy="17" r="6" fill="#ff5f56"/>
+<circle cx="40" cy="17" r="6" fill="#ffbd2e"/>
+<circle cx="60" cy="17" r="6" fill="#27c93f"/>
+<text x="513.5" y="22" text-anchor="middle" font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#8b949e">docktui — Compose projects</text>
+<g font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" style="white-space:pre">
+<text x="18.0" y="65.5" fill="#39c5cf" font-weight="bold" textLength="991.2" lengthAdjust="spacingAndGlyphs">╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗</text>
+<text x="18.0" y="83.5" fill="#39c5cf" font-weight="bold" textLength="991.2" lengthAdjust="spacingAndGlyphs">║                                       DockTUI Container Dashboard [default]                                        ║</text>
+<text x="18.0" y="101.5" fill="#39c5cf" font-weight="bold" textLength="991.2" lengthAdjust="spacingAndGlyphs">╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝</text>
+<text x="18.0" y="119.5" fill="#c9d1d9" textLength="134.4" lengthAdjust="spacingAndGlyphs">[Containers (1)]</text>
+<rect x="177.6" y="106.0" width="109.2" height="18.0" fill="#1f6feb"/>
+<text x="177.6" y="119.5" fill="#b1bac4" textLength="100.8" lengthAdjust="spacingAndGlyphs"> Compose (2)</text>
+<text x="286.8" y="119.5" fill="#c9d1d9" textLength="546.0" lengthAdjust="spacingAndGlyphs">   [Images (3)]   [Volumes (4)]   [Networks (5)]   [Contexts (6)]</text>
+<text x="18.0" y="137.5" fill="#c9d1d9" textLength="982.8" lengthAdjust="spacingAndGlyphs">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="18.0" y="155.5" fill="#c9d1d9" font-weight="bold" textLength="638.4" lengthAdjust="spacingAndGlyphs">PROJECT / SERVICE             CONTAINER                     STATE      IMAGE</text>
+<text x="18.0" y="173.5" fill="#c9d1d9" textLength="982.8" lengthAdjust="spacingAndGlyphs">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="18.0" y="191.5" fill="#c9d1d9" font-weight="bold" textLength="126.0" lengthAdjust="spacingAndGlyphs">monitoring  (2)</text>
+<rect x="18.0" y="196.0" width="840.0" height="18.0" fill="#1f6feb"/>
+<text x="18.0" y="209.5" fill="#b1bac4" textLength="764.4" lengthAdjust="spacingAndGlyphs">» grafana                     monitoring-grafana-1          running    grafana/grafana:11.2</text>
+<text x="18.0" y="227.5" fill="#c9d1d9" textLength="445.2" lengthAdjust="spacingAndGlyphs">  prometheus                  monitoring-prometheus-1</text>
+<text x="522.0" y="227.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="606.0" y="227.5" fill="#c9d1d9" textLength="184.8" lengthAdjust="spacingAndGlyphs"> prom/prometheus:v2.54</text>
+<text x="18.0" y="245.5" fill="#c9d1d9" font-weight="bold" textLength="75.6" lengthAdjust="spacingAndGlyphs">shop  (5)</text>
+<text x="18.0" y="263.5" fill="#c9d1d9" textLength="336.0" lengthAdjust="spacingAndGlyphs">  api                         shop-api-1</text>
+<text x="522.0" y="263.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="606.0" y="263.5" fill="#c9d1d9" textLength="126.0" lengthAdjust="spacingAndGlyphs"> shop/api:2.4.1</text>
+<text x="18.0" y="281.5" fill="#c9d1d9" textLength="352.8" lengthAdjust="spacingAndGlyphs">  cache                       shop-cache-1</text>
+<text x="522.0" y="281.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="606.0" y="281.5" fill="#c9d1d9" textLength="126.0" lengthAdjust="spacingAndGlyphs"> redis:7-alpine</text>
+<text x="18.0" y="299.5" fill="#c9d1d9" textLength="327.6" lengthAdjust="spacingAndGlyphs">  db                          shop-db-1</text>
+<text x="522.0" y="299.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="606.0" y="299.5" fill="#c9d1d9" textLength="159.6" lengthAdjust="spacingAndGlyphs"> postgres:16-alpine</text>
+<text x="18.0" y="317.5" fill="#c9d1d9" textLength="336.0" lengthAdjust="spacingAndGlyphs">  web                         shop-web-1</text>
+<text x="522.0" y="317.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="606.0" y="317.5" fill="#c9d1d9" textLength="126.0" lengthAdjust="spacingAndGlyphs"> shop/web:2.4.1</text>
+<text x="18.0" y="335.5" fill="#c9d1d9" textLength="361.2" lengthAdjust="spacingAndGlyphs">  worker                      shop-worker-1</text>
+<text x="522.0" y="335.5" fill="#d29922" textLength="84.0" lengthAdjust="spacingAndGlyphs">restarting</text>
+<text x="606.0" y="335.5" fill="#c9d1d9" textLength="151.2" lengthAdjust="spacingAndGlyphs"> shop/worker:2.4.1</text>
+<text x="18.0" y="353.5" fill="#c9d1d9" font-weight="bold" textLength="142.8" lengthAdjust="spacingAndGlyphs">(standalone)  (2)</text>
+<text x="18.0" y="371.5" fill="#c9d1d9" textLength="369.6" lengthAdjust="spacingAndGlyphs">  (standalone)                nightly-backup</text>
+<text x="522.0" y="371.5" fill="#ff7b72" textLength="50.4" lengthAdjust="spacingAndGlyphs">exited</text>
+<text x="606.0" y="371.5" fill="#c9d1d9" textLength="67.2" lengthAdjust="spacingAndGlyphs"> busybox</text>
+<text x="18.0" y="389.5" fill="#c9d1d9" textLength="310.8" lengthAdjust="spacingAndGlyphs">  (standalone)                traefik</text>
+<text x="522.0" y="389.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="606.0" y="389.5" fill="#c9d1d9" textLength="109.2" lengthAdjust="spacingAndGlyphs"> traefik:v3.1</text>
+<text x="18.0" y="425.5" fill="#c9d1d9" textLength="982.8" lengthAdjust="spacingAndGlyphs">═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════</text>
+<text x="18.0" y="443.5" fill="#c9d1d9" font-weight="bold" textLength="58.8" lengthAdjust="spacingAndGlyphs">Status:</text>
+<text x="76.8" y="443.5" fill="#c9d1d9" textLength="210.0" lengthAdjust="spacingAndGlyphs"> Switched tab to compose.</text>
+<text x="18.0" y="461.5" fill="#c9d1d9" textLength="982.8" lengthAdjust="spacingAndGlyphs">═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════</text>
+<text x="18.0" y="479.5" fill="#39c5cf" textLength="907.2" lengthAdjust="spacingAndGlyphs">[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources</text>
+<text x="18.0" y="497.5" fill="#39c5cf" textLength="756.0" lengthAdjust="spacingAndGlyphs">[O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit</text>
+</g></svg>

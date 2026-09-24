@@ -6,8 +6,8 @@ those concerns so views can stay focused on their data.
 """
 
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence, Tuple
 
 from .constants import MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH, VIEWPORT_OVERHEAD
 from .styles import BOLD, CYAN, RESET
@@ -58,7 +58,7 @@ def slice_viewport(
     lines: Sequence[str],
     scroll_index: int,
     viewport_height: int,
-) -> Tuple[List[str], int, int]:
+) -> tuple[list[str], int, int]:
     """Return the visible slice of `lines` plus the padding count for empty rows."""
     if viewport_height <= 0:
         return [], 0, 0
@@ -67,6 +67,33 @@ def slice_viewport(
     end = min(total, start + viewport_height)
     visible = list(lines[start:end])
     return visible, start, end
+
+
+def list_window(total: int, selected: int, rows: int) -> tuple[int, int]:
+    """Return ``(start, end)`` of a `rows`-tall window that keeps `selected` visible.
+
+    The selection is kept roughly centred so long lists scroll smoothly.
+    """
+    if rows <= 0 or total <= rows:
+        return 0, total
+    start = min(max(0, selected - rows // 2), total - rows)
+    return start, start + rows
+
+
+def wrap_hints(text: str, width: int, sep: str = " | ") -> list[str]:
+    """Wrap a ``"[K] Action | [K] Action"`` hint bar at separators, never mid-word."""
+    lines: list[str] = []
+    current = ""
+    for item in text.split(sep):
+        candidate = f"{current}{sep}{item}" if current else item
+        if current and len(candidate) > width:
+            lines.append(current)
+            current = item
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
 
 
 def pad_to_viewport(visible_count: int, viewport_height: int) -> None:

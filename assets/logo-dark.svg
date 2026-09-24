@@ -14,7 +14,7 @@
     <path d="M30 108h76" stroke="#39c5cf" stroke-width="5" stroke-linecap="round"/>
     <text x="30" y="124" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" font-weight="700" fill="#3fb950">$ _</text>
   </g>
-  <text x="206" y="98" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="66" font-weight="800" fill="#1f2328">DockTUI</text>
-  <text x="209" y="136" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" fill="#57606a">Docker dashboard &amp; health checks for your terminal</text>
-  <text x="210" y="168" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#0969da">dashboard · live logs · exec · compose · status · check · doctor</text>
+  <text x="206" y="98" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="66" font-weight="800" fill="#f0f6fc">DockTUI</text>
+  <text x="209" y="136" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" fill="#9198a1">Docker dashboard &amp; health checks for your terminal</text>
+  <text x="210" y="168" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#39c5cf">dashboard · live logs · exec · compose · status · check · doctor</text>
 </svg>

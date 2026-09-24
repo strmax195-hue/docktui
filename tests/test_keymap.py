@@ -61,5 +61,26 @@ class TestKeymap(unittest.TestCase):
         self.assertEqual(descs["x"], "Do X")
 
 
+class TestHotkeyOverlays(unittest.TestCase):
+    def test_parse_hotkey(self):
+        from docktui.keymap import parse_hotkey
+
+        self.assertEqual(parse_hotkey("ctrl+l"), "\x0c")
+        self.assertEqual(parse_hotkey("Ctrl-E"), "\x05")
+        self.assertEqual(parse_hotkey("^b"), "\x02")
+        # Reserved or unsupported specs are ignored.
+        self.assertEqual(parse_hotkey("ctrl+s"), "")
+        self.assertEqual(parse_hotkey("ctrl+c"), "")
+        self.assertEqual(parse_hotkey("f5"), "")
+
+    def test_resolve_hotkey_overlay(self):
+        from docktui.keymap import resolve_hotkey_overlay
+
+        overlays = {"ctrl+l": "ls -l", "ctrl+s": "ignored"}
+        self.assertEqual(resolve_hotkey_overlay(overlays, "\x0c"), "ls -l")
+        self.assertIsNone(resolve_hotkey_overlay(overlays, "\x13"))
+        self.assertIsNone(resolve_hotkey_overlay(overlays, "l"))
+
+
 if __name__ == "__main__":
     unittest.main()

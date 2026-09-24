@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1027" height="466" viewBox="0 0 1027 466" role="img" aria-label="docktui status / check — for scripts, cron and monitoring">
+<title>docktui status / check — for scripts, cron and monitoring</title>
+<rect width="1027" height="466" rx="10" fill="#0d1117"/>
+<rect x="0.5" y="0.5" width="1026" height="465" rx="10" fill="none" stroke="#30363d"/>
+<path d="M0 34H1027" stroke="#30363d"/>
+<circle cx="20" cy="17" r="6" fill="#ff5f56"/>
+<circle cx="40" cy="17" r="6" fill="#ffbd2e"/>
+<circle cx="60" cy="17" r="6" fill="#27c93f"/>
+<text x="513.5" y="22" text-anchor="middle" font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#8b949e">docktui status / check — for scripts, cron and monitoring</text>
+<g font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" style="white-space:pre">
+<text x="18.0" y="65.5" fill="#3fb950" textLength="126.0" lengthAdjust="spacingAndGlyphs">admin@prod-1:~$</text>
+<text x="152.4" y="65.5" fill="#c9d1d9" textLength="117.6" lengthAdjust="spacingAndGlyphs">docktui status</text>
+<text x="18.0" y="83.5" fill="#c9d1d9" textLength="856.8" lengthAdjust="spacingAndGlyphs">NAME                     STATE       HEALTH     CPU    MEM   PROJECT     IMAGE                  STATUS</text>
+<text x="18.0" y="101.5" fill="#c9d1d9" textLength="117.6" lengthAdjust="spacingAndGlyphs">nightly-backup</text>
+<text x="228.0" y="101.5" fill="#ff7b72" textLength="50.4" lengthAdjust="spacingAndGlyphs">exited</text>
+<text x="312.0" y="101.5" fill="#c9d1d9" textLength="697.2" lengthAdjust="spacingAndGlyphs">  -          -      -     -           busybox                Exited (2) 8 minutes …</text>
+<text x="18.0" y="119.5" fill="#c9d1d9" textLength="58.8" lengthAdjust="spacingAndGlyphs">traefik</text>
+<text x="228.0" y="119.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="312.0" y="119.5" fill="#c9d1d9" textLength="613.2" lengthAdjust="spacingAndGlyphs">  -          0.0%   0.0%  -           traefik:v3.1           Up 8 minutes</text>
+<text x="18.0" y="137.5" fill="#c9d1d9" textLength="168.0" lengthAdjust="spacingAndGlyphs">monitoring-grafana-1</text>
+<text x="228.0" y="137.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="328.8" y="137.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">healthy</text>
+<text x="404.4" y="137.5" fill="#c9d1d9" textLength="604.8" lengthAdjust="spacingAndGlyphs">  2.0%   0.0%  monitoring  grafana/grafana:11.2   Up 8 minutes (healthy)</text>
+<text x="18.0" y="155.5" fill="#c9d1d9" textLength="193.2" lengthAdjust="spacingAndGlyphs">monitoring-prometheus-1</text>
+<text x="228.0" y="155.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="312.0" y="155.5" fill="#c9d1d9" textLength="613.2" lengthAdjust="spacingAndGlyphs">  -          98.6%  0.0%  monitoring  prom/prometheus:v2.54  Up 8 minutes</text>
+<text x="18.0" y="173.5" fill="#c9d1d9" textLength="84.0" lengthAdjust="spacingAndGlyphs">shop-api-1</text>
+<text x="228.0" y="173.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="328.8" y="173.5" fill="#ff7b72" textLength="75.6" lengthAdjust="spacingAndGlyphs">unhealthy</text>
+<text x="404.4" y="173.5" fill="#c9d1d9" textLength="604.8" lengthAdjust="spacingAndGlyphs">  0.0%   0.0%  shop        shop/api:2.4.1         Up 8 minutes (unhealt…</text>
+<text x="18.0" y="191.5" fill="#c9d1d9" textLength="100.8" lengthAdjust="spacingAndGlyphs">shop-cache-1</text>
+<text x="228.0" y="191.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="312.0" y="191.5" fill="#c9d1d9" textLength="613.2" lengthAdjust="spacingAndGlyphs">  -          0.0%   0.0%  shop        redis:7-alpine         Up 8 minutes</text>
+<text x="18.0" y="209.5" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacingAndGlyphs">shop-db-1</text>
+<text x="228.0" y="209.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="328.8" y="209.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">healthy</text>
+<text x="404.4" y="209.5" fill="#c9d1d9" textLength="604.8" lengthAdjust="spacingAndGlyphs">  0.0%   0.0%  shop        postgres:16-alpine     Up 8 minutes (healthy)</text>
+<text x="18.0" y="227.5" fill="#c9d1d9" textLength="84.0" lengthAdjust="spacingAndGlyphs">shop-web-1</text>
+<text x="228.0" y="227.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">running</text>
+<text x="328.8" y="227.5" fill="#3fb950" textLength="58.8" lengthAdjust="spacingAndGlyphs">healthy</text>
+<text x="404.4" y="227.5" fill="#c9d1d9" textLength="604.8" lengthAdjust="spacingAndGlyphs">  2.4%   0.0%  shop        shop/web:2.4.1         Up 8 minutes (healthy)</text>
+<text x="18.0" y="245.5" fill="#c9d1d9" textLength="109.2" lengthAdjust="spacingAndGlyphs">shop-worker-1</text>
+<text x="228.0" y="245.5" fill="#ff7b72" textLength="84.0" lengthAdjust="spacingAndGlyphs">restarting</text>
+<text x="312.0" y="245.5" fill="#c9d1d9" textLength="697.2" lengthAdjust="spacingAndGlyphs">  -          0.0%   0.0%  shop        shop/worker:2.4.1      Restarting (1) 12 sec…</text>
+<text x="18.0" y="281.5" fill="#c9d1d9" textLength="504.0" lengthAdjust="spacingAndGlyphs">9 containers: 7 running, 1 exited, 1 restarting, 1 unhealthy</text>
+<text x="18.0" y="317.5" fill="#3fb950" textLength="126.0" lengthAdjust="spacingAndGlyphs">admin@prod-1:~$</text>
+<text x="152.4" y="317.5" fill="#c9d1d9" textLength="411.6" lengthAdjust="spacingAndGlyphs">docktui check --cpu-warn 90 --require &#x27;shop-db-*&#x27;</text>
+<text x="18.0" y="335.5" fill="#c9d1d9" textLength="831.6" lengthAdjust="spacingAndGlyphs">DOCKTUI CRITICAL - 3 critical, 1 warning | containers=9 running=7 exited=1 restarting=1 unhealthy=1</text>
+<text x="18.0" y="353.5" fill="#c9d1d9" textLength="378.0" lengthAdjust="spacingAndGlyphs">[CRITICAL] nightly-backup: exited with code 2</text>
+<text x="18.0" y="371.5" fill="#c9d1d9" textLength="436.8" lengthAdjust="spacingAndGlyphs">[CRITICAL] shop-api-1: healthcheck reports unhealthy</text>
+<text x="18.0" y="389.5" fill="#c9d1d9" textLength="478.8" lengthAdjust="spacingAndGlyphs">[CRITICAL] shop-worker-1: restart loop (last exit code 1)</text>
+<text x="18.0" y="407.5" fill="#c9d1d9" textLength="428.4" lengthAdjust="spacingAndGlyphs">[WARNING] monitoring-prometheus-1: CPU 99.8% &gt;= 90%</text>
+<text x="18.0" y="443.5" fill="#3fb950" textLength="126.0" lengthAdjust="spacingAndGlyphs">admin@prod-1:~$</text>
+<rect x="152.4" y="430.0" width="8.4" height="18.0" fill="#b1bac4"/>
+</g></svg>

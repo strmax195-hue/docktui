@@ -1,0 +1,22 @@
+name: shop
+services:
+  web:
+    image: shop/web:2.4.1
+    command: sh -c 'i=0; while true; do i=$$((i+1)); echo "$$(date -Iseconds) INFO  GET /api/products 200 $$((i%40+3))ms"; [ $$((i%7)) -eq 0 ] && echo "$$(date -Iseconds) WARN  slow upstream shop-api:8080 took 812ms"; [ $$((i%11)) -eq 0 ] && echo "$$(date -Iseconds) ERROR upstream timed out (api:8080) request_id=$$i"; sleep 1; done'
+    ports: ["8080:80"]
+    healthcheck: {test: ["CMD", "true"], interval: 2s}
+  api:
+    image: shop/api:2.4.1
+    command: sleep 100000
+    healthcheck: {test: ["CMD", "false"], interval: 2s, retries: 1}
+  db:
+    image: postgres:16-alpine
+    command: sleep 100000
+    healthcheck: {test: ["CMD", "true"], interval: 2s}
+  cache:
+    image: redis:7-alpine
+    command: sleep 100000
+  worker:
+    image: shop/worker:2.4.1
+    command: sh -c 'sleep 2; exit 1'
+    restart: always

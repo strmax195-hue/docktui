@@ -8,9 +8,10 @@ this object.
 """
 
 import json
-from dataclasses import asdict, dataclass, fields
+import os
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Optional
 
 from .constants import (
     AVAILABLE_THEMES,
@@ -30,6 +31,14 @@ from .constants import (
     DEFAULT_THEME,
 )
 
+#: Mapping of `poll_intervals` entries to the dataclass fields they set.
+_POLL_INTERVAL_KEYS = {
+    "containers": "refresh_interval",
+    "images": "refresh_interval_images",
+    "volumes": "refresh_interval_volumes",
+    "networks": "refresh_interval_networks",
+}
+
 
 @dataclass
 class Config:
@@ -46,11 +55,13 @@ class Config:
     cpu_alert_threshold: float = DEFAULT_CPU_ALERT_THRESHOLD
     exec_history_cap: int = DEFAULT_EXEC_HISTORY_CAP
     scroll_delta: int = DEFAULT_SCROLL_DELTA
-    exec_presets: List[str] = None  # type: ignore[assignment]
-    log_highlights: List[Dict[str, str]] = None  # type: ignore[assignment]
-    endpoints: List[Dict[str, str]] = None  # type: ignore[assignment]
-    hotkey_overlays: Dict[str, str] = None  # type: ignore[assignment]
+    exec_presets: list[str] = None  # type: ignore[assignment]
+    log_highlights: list[dict[str, str]] = None  # type: ignore[assignment]
+    endpoints: list[dict[str, str]] = None  # type: ignore[assignment]
+    hotkey_overlays: dict[str, str] = None  # type: ignore[assignment]
     active_endpoint: Optional[str] = None
+    #: File this config was loaded from; `save()` writes back to it.
+    _path: Optional[Path] = field(default=None, repr=False, compare=False)
 
     _CANDIDATE_PATHS: ClassVar[tuple] = (
         Path.home() / ".config" / "docktui" / "config.json",
@@ -70,48 +81,116 @@ class Config:
     # ------------------------------------------------------------------ load/save
 
     @classmethod
+    def candidate_paths(cls) -> tuple[Path, ...]:
+        """Config locations in lookup order.
+
+        ``$DOCKTUI_CONFIG`` wins, then ``$XDG_CONFIG_HOME/docktui/config.json``,
+        then ``~/.config/docktui/config.json`` and ``~/.docktui.json``.
+        """
+        paths: list[Path] = []
+        env_path = os.environ.get("DOCKTUI_CONFIG")
+        if env_path:
+            paths.append(Path(env_path).expanduser())
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        if xdg:
+            paths.append(Path(xdg).expanduser() / "docktui" / "config.json")
+        for candidate in cls._CANDIDATE_PATHS:
+            if candidate not in paths:
+                paths.append(candidate)
+        return tuple(paths)
+
+    @classmethod
     def default_config_path(cls) -> Path:
-        """Return the path where `save()` will write."""
-        return cls._CANDIDATE_PATHS[0]
+        """Return the path where `save()` writes when no file was loaded."""
+        return cls.candidate_paths()[0]
+
+    @classmethod
+    def find_existing_path(cls) -> Optional[Path]:
+        """Return the first existing config file, or ``None``."""
+        for candidate in cls.candidate_paths():
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def read_raw(path: Path) -> dict[str, Any]:
+        """Read a config file as a dict; ``{}`` if it is missing or malformed."""
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, ValueError):
+            return {}
+        return raw if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def validate_file(path: Path) -> Optional[str]:
+        """Return a human-readable error for an unreadable config file, else ``None``."""
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except OSError as exc:
+            return f"cannot read file ({exc.strerror or exc})"
+        except ValueError as exc:
+            return f"invalid JSON ({exc})"
+        if not isinstance(raw, dict):
+            return "top-level value must be a JSON object"
+        return None
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "Config":
         """Load configuration from `path` (or the first existing candidate)."""
-        target = path
-        if target is None:
-            for candidate in cls._CANDIDATE_PATHS:
-                if candidate.is_file():
-                    target = candidate
-                    break
+        target = path or cls.find_existing_path()
         if target is None or not target.is_file():
-            return cls()
-        try:
-            with open(target, encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            return cls()
-        if not isinstance(raw, dict):
-            return cls()
-        return cls.from_dict(raw)
+            config = cls()
+        else:
+            config = cls.from_dict(cls.read_raw(target))
+        config._path = target
+        return config
+
+    @property
+    def path(self) -> Path:
+        """Where this config lives on disk (or will be written)."""
+        return self._path or self.default_config_path()
 
     def save(self, path: Optional[Path] = None) -> Path:
-        """Persist the configuration to `path` (default: standard config location)."""
-        target = path or self.default_config_path()
+        """Persist the configuration to `path` (default: the file it was loaded from)."""
+        target = path or self.path
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(target, "w", encoding="utf-8") as fh:
             json.dump(self.to_dict(), fh, indent=2, sort_keys=True)
+            fh.write("\n")
+        self._path = target
         return target
 
     # ------------------------------------------------------------------ dict
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         return {k: v for k, v in data.items() if not k.startswith("_")}
 
     @classmethod
-    def from_dict(cls, raw: Dict[str, Any]) -> "Config":
-        known = {f.name for f in fields(cls) if not f.name.startswith("_")}
-        clean: Dict[str, Any] = {k: v for k, v in raw.items() if k in known}
+    def from_dict(cls, raw: dict[str, Any]) -> "Config":
+        known = {f.name: f for f in fields(cls) if not f.name.startswith("_")}
+        clean: dict[str, Any] = {k: v for k, v in raw.items() if k in known}
+        # `poll_intervals` is a friendlier spelling of the per-resource refresh
+        # intervals; explicit `refresh_interval_*` keys take precedence.
+        polls = raw.get("poll_intervals")
+        if isinstance(polls, dict):
+            for resource, key in _POLL_INTERVAL_KEYS.items():
+                if resource in polls and key not in clean:
+                    clean[key] = polls[resource]
+        # Coerce numeric fields; drop values that cannot be parsed so the
+        # dataclass default applies instead of crashing later comparisons.
+        for key in list(clean):
+            ftype = known[key].type
+            if ftype in (int, float):
+                value = clean[key]
+                try:
+                    if isinstance(value, bool):
+                        raise TypeError
+                    clean[key] = int(float(value)) if ftype is int else float(value)
+                except (TypeError, ValueError):
+                    del clean[key]
         # Coerce list fields to the right type to be tolerant of malformed input.
         for key in ("exec_presets", "log_highlights", "endpoints"):
             value = clean.get(key)
@@ -126,7 +205,9 @@ class Config:
         # Coerce dict fields
         if not isinstance(clean.get("hotkey_overlays"), dict):
             clean["hotkey_overlays"] = {}
-        # Normalize theme to a known preset.
+        # Normalize theme to a known preset (accept the "high-contrast" spelling).
+        if clean.get("theme") == "high-contrast":
+            clean["theme"] = "high_contrast"
         if clean.get("theme") not in AVAILABLE_THEMES:
             clean["theme"] = DEFAULT_THEME
         return cls(**clean)

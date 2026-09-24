@@ -1,36 +1,41 @@
 [build-system]
-requires = ["setuptools>=61.0.0", "wheel"]
+requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "docktui"
-version = "1.4.0"
-
-description = "A lightweight, zero-dependency TUI dashboard for managing Docker containers"
+dynamic = ["version"]
+description = "Zero-dependency terminal dashboard and health checker for Docker: containers, Compose, logs, exec, cleanup, and Nagios-style checks"
 readme = "README.md"
 authors = [
     { name = "DockTUI Maintainers" }
 ]
-license = { text = "MIT" }
-keywords = ["docker", "tui", "terminal", "containers", "monitoring", "devops"]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "docker", "docker-compose", "tui", "terminal", "cli", "containers",
+    "monitoring", "healthcheck", "nagios", "devops", "sysadmin", "dashboard",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
     "Environment :: Console",
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "Topic :: System :: Systems Administration",
-    "Topic :: Software Development :: Build Tools",
-    "Topic :: System :: Monitoring"
+    "Topic :: System :: Monitoring",
+    "Topic :: Utilities",
+    "Typing :: Typed",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]
@@ -41,11 +46,11 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
     "mypy>=1.10.0",
-    "types-requests"
 ]
 
 [project.urls]
 Homepage = "https://github.com/strmax195-hue/docktui"
+Documentation = "https://github.com/strmax195-hue/docktui#readme"
 Bug-Tracker = "https://github.com/strmax195-hue/docktui/issues"
 Changelog = "https://github.com/strmax195-hue/docktui/blob/main/CHANGELOG.md"
 Roadmap = "https://github.com/strmax195-hue/docktui/blob/main/ROADMAP.md"
@@ -57,9 +62,15 @@ docktui = "docktui.cli:main"
 [tool.setuptools.packages.find]
 include = ["docktui*"]
 
+[tool.setuptools.dynamic]
+version = { attr = "docktui.__version__" }
+
+[tool.setuptools.package-data]
+docktui = ["py.typed"]
+
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
@@ -69,3 +80,19 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B", "E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.9"
+files = ["docktui"]
+warn_unused_ignores = false
+
+[tool.coverage.run]
+source = ["docktui"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

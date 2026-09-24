@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1027" height="340" viewBox="0 0 1027 340" role="img" aria-label="docktui doctor">
+<title>docktui doctor</title>
+<rect width="1027" height="340" rx="10" fill="#0d1117"/>
+<rect x="0.5" y="0.5" width="1026" height="339" rx="10" fill="none" stroke="#30363d"/>
+<path d="M0 34H1027" stroke="#30363d"/>
+<circle cx="20" cy="17" r="6" fill="#ff5f56"/>
+<circle cx="40" cy="17" r="6" fill="#ffbd2e"/>
+<circle cx="60" cy="17" r="6" fill="#27c93f"/>
+<text x="513.5" y="22" text-anchor="middle" font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#8b949e">docktui doctor</text>
+<g font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" style="white-space:pre">
+<text x="18.0" y="65.5" fill="#3fb950" textLength="126.0" lengthAdjust="spacingAndGlyphs">admin@prod-1:~$</text>
+<text x="152.4" y="65.5" fill="#c9d1d9" textLength="117.6" lengthAdjust="spacingAndGlyphs">docktui doctor</text>
+<text x="18.0" y="83.5" fill="#c9d1d9" textLength="168.0" lengthAdjust="spacingAndGlyphs">DockTUI 1.5.0 doctor</text>
+<text x="18.0" y="119.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="119.5" fill="#c9d1d9" textLength="327.6" lengthAdjust="spacingAndGlyphs"> Python          3.11.15 (Linux x86_64)</text>
+<text x="18.0" y="137.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="137.5" fill="#c9d1d9" textLength="352.8" lengthAdjust="spacingAndGlyphs"> Docker CLI      29.3.1 at /usr/bin/docker</text>
+<text x="18.0" y="155.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="155.5" fill="#c9d1d9" textLength="344.4" lengthAdjust="spacingAndGlyphs"> Docker daemon   reachable, server 29.3.1</text>
+<text x="18.0" y="173.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="173.5" fill="#c9d1d9" textLength="285.6" lengthAdjust="spacingAndGlyphs"> Endpoint        context `default`</text>
+<text x="18.0" y="191.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="191.5" fill="#c9d1d9" textLength="310.8" lengthAdjust="spacingAndGlyphs"> Socket access   /var/run/docker.sock</text>
+<text x="18.0" y="209.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="209.5" fill="#c9d1d9" textLength="243.6" lengthAdjust="spacingAndGlyphs"> Docker Compose  plugin 5.1.1</text>
+<text x="18.0" y="227.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="227.5" fill="#c9d1d9" textLength="596.4" lengthAdjust="spacingAndGlyphs"> Config file     none (defaults); create one with `docktui config init`</text>
+<text x="18.0" y="245.5" fill="#3fb950" textLength="50.4" lengthAdjust="spacingAndGlyphs">[ OK ]</text>
+<text x="68.4" y="245.5" fill="#c9d1d9" textLength="327.6" lengthAdjust="spacingAndGlyphs"> Terminal        118x24, colors enabled</text>
+<text x="18.0" y="281.5" fill="#c9d1d9" textLength="462.0" lengthAdjust="spacingAndGlyphs">All checks passed. Run `docktui` to open the dashboard.</text>
+<text x="18.0" y="317.5" fill="#3fb950" textLength="126.0" lengthAdjust="spacingAndGlyphs">admin@prod-1:~$</text>
+<rect x="152.4" y="304.0" width="8.4" height="18.0" fill="#b1bac4"/>
+</g></svg>

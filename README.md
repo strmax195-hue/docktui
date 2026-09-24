@@ -1,110 +1,191 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="DockTUI" width="660">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" alt="DockTUI" width="640">
+  </picture>
 </p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
+<p align="center">
+  <b>The Docker dashboard for people who live in SSH sessions.</b><br>
+  A zero-dependency terminal UI <i>and</i> a scriptable health checker for Docker hosts.
+</p>
 
-[![Tests](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml/badge.svg)](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml)
-[![Lint](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml/badge.svg?job=lint)](https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
+<p align="center">
+  <a href="https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml"><img src="https://github.com/strmax195-hue/docktui/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/strmax195-hue/docktui/actions/workflows/codeql.yml"><img src="https://github.com/strmax195-hue/docktui/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+"></a>
+  <img src="https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg" alt="Zero runtime dependencies">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+</p>
 
-**DockTUI** is a fast, zero-dependency terminal dashboard for monitoring, debugging, and managing local Docker containers and images. It is written in pure Python, talks to Docker through the Docker CLI, and keeps your existing Docker permissions and context intact.
+**DockTUI** is a fast terminal dashboard for monitoring, debugging and managing Docker containers, Compose stacks, images, volumes and networks. It is pure Python standard library, drives the regular `docker` CLI, and therefore works anywhere Docker works: your laptop, a jump host, a production box over SSH, or a remote daemon via `DOCKER_HOST`.
 
+<p align="center">
+  <img src="assets/screenshot-dashboard.svg" alt="DockTUI dashboard: container list with health status and resource usage, live logs of shop-web-1 pinned underneath" width="100%">
+</p>
 
-Use DockTUI when you want something richer than repeated `docker ps`, `docker stats`, and `docker logs`, but lighter than a web dashboard or a heavyweight TUI framework.
+It is also a **non-interactive tool for ops**: `docktui status` prints a snapshot, `docktui check` is a ready-made Nagios/Icinga/Zabbix/cron health check with proper exit codes, and `docktui doctor` tells you exactly why Docker isn't working.
 
----
-
-## Why DockTUI?
-
-- **Zero runtime dependencies**: install the package and run it. No Docker SDK, no TUI framework, no daemon sidecar.
-- **Docker-native behavior**: DockTUI wraps the Docker CLI, so it respects your current Docker context, permissions, and platform setup.
-- **Practical workflows**: start, stop, restart, rename, inspect, tail logs, execute commands, browse images, volumes, networks, and review disk usage from one terminal screen.
-- **Compose-aware dashboard**: containers are grouped by Docker Compose project and service labels when available.
-- **Safe cleanup flow**: destructive cleanup requires explicit confirmation and supports separate system, image, volume, and full prune actions.
-- **Interactive settings editor**: refresh interval, log tail limit, theme, exec presets, and log highlight patterns can all be tuned from the dashboard (press `Shift+S`) and saved back to your config file.
-- **Multi-host friendly**: register multiple remote endpoints in your config and switch between them with a single keypress, without touching `DOCKER_HOST` in your shell.
-- **Friendly codebase**: small pure-Python modules, unit tests with subprocess mocking, and CI on Linux, macOS, and Windows.
-
-## Key Features
-
-| Area | What DockTUI gives you |
-| --- | --- |
-| **Docker dashboard** | Containers, Compose groups, images, volumes, networks, and contexts in one terminal UI. |
-| **Daily actions** | Start, stop, restart, rename, inspect, delete images/volumes, run safe prune flows. |
-| **Logs** | Follow mode, search, next-match navigation, error/warning-only filtering, regex highlighting, and adjustable tail size. |
-| **Exec** | Preset, recent, and custom commands inside running containers. |
-| **Details** | Readable container summary for ports, mounts, env, labels, networks, restart policy, and live CPU/memory limits. |
-| **Registry & images** | Search Docker Hub and pull images directly from the Images tab with a live progress view. |
-| **Multi-host** | Per-instance DOCKER_HOST switching and user-defined endpoint registry persisted in the config file. |
-| **Resource limits** | Edit live CPU and memory allocations (wraps `docker update`) from the Details view. |
-| **Container cloning** | Spawn a copy of a container (`docker run` with name and port overrides) from the Containers tab. |
-| **Volume browser** | Drill into Docker volume files using a lightweight in-app directory explorer. |
-| **Zero dependencies** | Pure Python standard library implementation; no Docker SDK or TUI framework required. |
+<p align="center">
+  <img src="assets/screenshot-cli.svg" alt="docktui status and docktui check output in a shell" width="100%">
+</p>
 
 ---
 
-## DockTUI vs alternatives
+## Contents
 
-| Tooling style | Best for | Tradeoff |
-| --- | --- | --- |
-| `docker ps`, `docker logs`, `docker stats` | Maximum control and scripting | Repetitive for day-to-day monitoring |
-| Web dashboards | Rich graphical management | Heavier setup and more moving parts |
-| Full-featured TUI managers | Broad Docker workflows | Often depend on larger external runtimes |
-| **DockTUI** | Lightweight local monitoring and quick actions | Intentionally focused on common local Docker tasks |
+- [Why admins like it](#why-admins-like-it)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Scripting & monitoring](#scripting--monitoring) — `status`, `check`, `doctor`
+- [Dashboard features](#dashboard-features)
+- [Configuration](#configuration)
+- [Remote hosts](#remote-docker-hosts-ssh--tcp)
+- [Keyboard reference](#keyboard-reference)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
 
-## Installation
+## Why admins like it
 
-**Option 1: Install from GitHub Releases (Recommended)**
+- **Nothing to install on the server but Python.** No Go/Rust binary to ship, no Docker SDK, no TUI framework, no agent. `pipx install` and go — also on air-gapped hosts (copy one wheel).
+- **Uses your existing Docker setup.** DockTUI shells out to `docker`, so contexts, `DOCKER_HOST`, TLS certs, SSH keys, rootless Docker and group permissions all just work.
+- **Built for real hosts, not demos.** Scrollable lists for hundreds of containers, Compose-aware grouping, health status, crash/restart detection, bulk start/stop of a filtered set, and live logs pinned under the container list.
+- **Scriptable.** JSON output, glob filters, and Nagios-compatible exit codes (`0` OK, `1` WARNING, `2` CRITICAL, `3` UNKNOWN).
+- **Safe by default.** Destructive actions (delete, prune, bulk stop) ask for confirmation; prune requires typing a keyword.
+- **Your shortcuts.** Bind `Ctrl+<letter>` to any command you run inside containers all day (`tail -f /var/log/app.log`, `env`, `df -h`).
+
+## Install
+
+DockTUI needs Python 3.9+ and the Docker CLI. It has **zero runtime dependencies**.
+
 ```bash
+# Recommended: isolated install with pipx (or: uv tool install ...)
+pipx install git+https://github.com/strmax195-hue/docktui.git
+
+# Plain pip
+pip install git+https://github.com/strmax195-hue/docktui.git
+
+# A specific release wheel (see the Releases page for the file name)
 pip install https://github.com/strmax195-hue/docktui/releases/download/v1.4.0/docktui-1.4.0-py3-none-any.whl
 ```
 
-**Option 2: Install from PyPI**
-```bash
-pip install docktui
-```
+Air-gapped host? Download the `.whl` from [Releases](https://github.com/strmax195-hue/docktui/releases), copy it over, and `pip install docktui-*.whl` — there is nothing else to fetch.
 
-*(Alternatively, you can install the latest development branch from GitHub: `pip install git+https://github.com/strmax195-hue/docktui.git`)*
+If `docktui` is not on your `PATH` (common on Windows), run `python -m docktui` instead.
 
-Local development:
+## Quick start
 
 ```bash
-git clone https://github.com/strmax195-hue/docktui.git
-cd docktui
-pip install -e .
+docktui doctor                 # check Docker CLI, daemon, permissions, compose, config, terminal
+docktui                        # open the dashboard
+docktui -H ssh://admin@prod-1  # dashboard for a remote daemon over SSH
+docktui status                 # one-shot table of containers, then exit
+docktui check                  # health check for scripts and monitoring
 ```
 
----
+## Scripting & monitoring
 
-## Usage
+All sub-commands accept `-H/--host`, `--docker-timeout` and `-c/--config`, and never need a TTY.
 
-If your Python `Scripts` or `bin` directory is in your system `PATH`, you can simply run:
+### `docktui status` — snapshot
+
+```text
+$ docktui status --filter 'shop*'
+NAME          STATE       HEALTH     CPU    MEM    PROJECT  IMAGE              STATUS
+shop-api-1    running     unhealthy  12.3%  41.0%  shop     shop/api:2.4.1     Up 3 hours (unhealthy)
+shop-db-1     running     healthy    1.1%   22.5%  shop     postgres:16        Up 3 days (healthy)
+shop-web-1    running     -          0.4%   3.2%   shop     nginx:1.27         Up 3 days
+
+3 containers: 3 running, 0 exited, 0 restarting, 1 unhealthy
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--json` | Machine-readable output (name, state, health, exit code, CPU %, memory %, Compose project/service, ports…) |
+| `-f, --filter GLOB` | Only containers **or Compose projects** matching the glob (repeatable) |
+| `-x, --exclude GLOB` | Skip matching containers/projects (repeatable) |
+| `--no-stats` | Skip `docker stats` for a faster answer on busy hosts |
+
 ```bash
-docktui
+# Names of all unhealthy containers
+docktui status --json --no-stats | jq -r '.[] | select(.health=="unhealthy") | .name'
 ```
 
-**Note:** If your terminal says `command not found` (which can happen on Windows), you can always launch it directly as a Python module:
+### `docktui check` — health check with exit codes
+
+`check` flags a container as **CRITICAL** when its healthcheck is `unhealthy`, it is in a restart loop, it is `dead`, it exited with a non-zero code (except `143`/SIGTERM from a normal `docker stop`), or a `--require`d container is missing or not running. It raises a **WARNING** for exit code `137` (OOM killer or stop timeout) and for CPU/memory at or above your thresholds.
+
 ```bash
-python -m docktui
+docktui check --cpu-warn 90 --mem-warn 90 --require 'postgres*' --require 'nginx' --exclude 'ci-runner-*'
+docktui check --json   # structured output
+docktui check -q       # no output, exit code only
 ```
 
-Useful options:
+**Cron** — mail yourself only when something is wrong:
+
+```cron
+*/5 * * * *  docktui check --mem-warn 90 >/tmp/docktui-check.txt || mail -s "docker: $(head -1 /tmp/docktui-check.txt)" ops@example.com </tmp/docktui-check.txt
+```
+
+**Nagios / Icinga / NRPE** — the output already follows the plugin format (status line, perfdata after `|`, details below):
+
+```ini
+command[check_docker]=/usr/local/bin/docktui check --mem-warn 90 --require 'app-*'
+```
+
+**CI / deploy scripts** — fail a pipeline if the stack didn't come up healthy:
+
 ```bash
-docktui --version
-docktui --refresh-interval 5
-docktui --docker-timeout 15
-docktui --theme light
-docktui --host ssh://user@remote-host
-docktui -H tcp://192.168.1.100:2375
+docker compose up -d && sleep 20 && docktui check --filter myproject --require 'myproject-web-*'
 ```
 
-### Configuration File
+### `docktui doctor` — "why doesn't it work?"
 
-DockTUI can load defaults from a JSON configuration file located at `~/.config/docktui/config.json` (or `~/.docktui.json`). Any options specified via command-line flags will override the configuration file defaults. You can edit the same options from inside the dashboard via **Shift+S** — saving writes them back to the file.
+<p align="center">
+  <img src="assets/screenshot-doctor.svg" alt="docktui doctor output listing environment checks" width="100%">
+</p>
 
-Example configuration:
+It also warns about unencrypted `tcp://…:2375` endpoints, a missing `ssh` client for `ssh://` hosts, broken config JSON and too-small terminals. Exit code is `1` if anything failed.
+
+### `docktui config`
+
+```bash
+docktui config init    # write a config file with every option and its default
+docktui config path    # where DockTUI reads/writes its config
+docktui config show    # effective configuration as JSON (after CLI overrides)
+```
+
+## Dashboard features
+
+<p align="center">
+  <img src="assets/screenshot-compose.svg" alt="Compose tab grouping containers by project and service" width="100%">
+</p>
+
+| Area | What you get |
+| --- | --- |
+| **Containers** | State, health and status at a glance; unhealthy/restarting rows highlighted; live CPU/memory/network bars with alert threshold; sort and state filters; scrolls smoothly through hundreds of containers. |
+| **Compose** | Containers grouped by Compose project/service; start/stop/restart a whole project; `up`, `down`, `build`, `up --build`; aggregated project logs. |
+| **Bulk actions** | Filter (`/`, `Y`) then `Ctrl+S` to stop or start the whole matching set in one Docker call. |
+| **Logs** | Follow mode with live streaming, search and next-match, errors/warnings-only filter, regex highlights, adjustable tail, export to file, and **pin logs under the dashboard** (`P`) while you keep navigating. |
+| **Exec** | Presets, history with type-to-search, background output view or a real interactive `docker exec -it` shell, plus your own `Ctrl+<letter>` hotkeys. |
+| **Inspect & details** | Readable summary (ports, mounts, env, labels, networks, IP/MAC, restart policy, limits), raw `inspect` JSON, `docker top`, and a generated `docker-compose.yml` snippet. |
+| **Change things** | Rename, clone with new name/ports, edit live CPU/memory limits (`docker update`). |
+| **Images / volumes / networks** | Browse, delete with confirmation, Docker Hub search & pull with live progress, in-app volume file browser. |
+| **Cleanup** | Disk-usage view with separate system / images / volumes / everything prune, each behind a typed confirmation. |
+| **Hosts** | Docker contexts tab, `DOCKER_HOST`/`-H` support, and a named endpoint registry to hop between servers without touching your shell. |
+| **Comfort** | Dark, light and high-contrast themes, `NO_COLOR` / `--no-color`, mouse-wheel scrolling, in-app settings editor (`Shift+S`), Windows/macOS/Linux. |
+
+## Configuration
+
+DockTUI reads the first file that exists:
+
+1. `$DOCKTUI_CONFIG`
+2. `$XDG_CONFIG_HOME/docktui/config.json`
+3. `~/.config/docktui/config.json`
+4. `~/.docktui.json`
+
+…or the file given with `-c/--config`. Command-line flags override the file. `docktui config init` writes a complete file for you, and the in-app editor (`Shift+S`) saves back to the same file it was loaded from.
 
 ```json
 {
@@ -116,77 +197,50 @@ Example configuration:
   "log_max": 500,
   "cpu_alert_threshold": 80.0,
   "exec_history_cap": 10,
-  "exec_presets": [
-    "sh",
-    "bash",
-    "env",
-    "ps aux",
-    "df -h"
-  ],
+  "exec_presets": ["sh", "bash", "env", "ps aux", "df -h"],
   "poll_intervals": {
     "containers": 3.0,
     "images": 15.0,
     "volumes": 30.0,
-    "networks": 30.0,
-    "contexts": 10.0
+    "networks": 30.0
   },
   "hotkey_overlays": {
-    "ctrl+l": "ls -l",
-    "ctrl+e": "env"
+    "ctrl+l": "tail -n 200 /var/log/app/current.log",
+    "ctrl+e": "env",
+    "ctrl+d": "df -h"
   },
   "log_highlights": [
-    {"label": "errors", "pattern": "ERROR|FAIL"},
+    {"label": "errors", "pattern": "ERROR|FATAL|panic"},
     {"label": "auth",   "pattern": "AUTH|login"}
   ],
   "endpoints": [
-    {"name": "prod",  "host": "ssh://user@prod.example",  "description": "Production"},
-    {"name": "stage", "host": "tcp://10.0.0.5:2375",     "description": "Staging"}
+    {"name": "prod",  "host": "ssh://admin@prod.example", "description": "Production"},
+    {"name": "stage", "host": "ssh://admin@stage.example", "description": "Staging"}
   ],
   "active_endpoint": "prod"
 }
 ```
 
-### Remote Docker Daemons (SSH/TCP)
+Notes:
 
-DockTUI supports connecting to remote Docker daemons via the standard `DOCKER_HOST` environment variable, or by passing the `--host` (or `-H`) command-line flag:
+- `hotkey_overlays` keys are `ctrl+<letter>`. `Ctrl+C/H/I/J/M/S/Z` are reserved by the terminal or DockTUI and are ignored. The command runs in the selected running container and opens in the Exec view.
+- Invalid values (e.g. a string where a number belongs) fall back to defaults instead of crashing; `docktui doctor` points out broken JSON.
+
+## Remote Docker hosts (SSH / TCP)
 
 ```bash
-# Connect via SSH
-docktui -H ssh://user@remote-host
-
-# Connect via TCP
-docktui -H tcp://192.168.1.100:2375
+docktui -H ssh://admin@prod-1          # or: export DOCKER_HOST=ssh://admin@prod-1
+docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCKER_CERT_PATH as usual
 ```
 
-#### SSH Connection Requirements
-When connecting via SSH, DockTUI executes commands non-interactively. This means that:
-- Passwordless SSH authentication must be configured (e.g. using SSH public key authentication with keys loaded in your SSH agent).
-- The remote host key must already be present in your local `known_hosts` file (otherwise, SSH prompts to confirm the host fingerprint and hangs).
+- **SSH** runs non-interactively: use key-based auth (agent loaded) and make sure the host key is already in `known_hosts`, otherwise SSH waits for a prompt that never comes.
+- **Plain `tcp://…:2375`** is unauthenticated and unencrypted; `docktui doctor` warns about it. Prefer `ssh://` or TLS on 2376.
+- **Endpoint switcher**: named `endpoints` in the config (or `N` on the Contexts tab) switch DockTUI's per-instance `DOCKER_HOST` without touching your shell environment. The active endpoint is shown in the title bar.
+- When `DOCKER_HOST` is set, Docker contexts are overridden; the Contexts tab says so and disables switching.
 
-#### Endpoint Switcher
-For users who frequently switch between several remote daemons, the **endpoints** list in the config file (or the **N** key on the Contexts tab) provides a registry of named connections. Activating an endpoint updates DockTUI's per-instance `DOCKER_HOST` without modifying your shell environment. The active endpoint is highlighted in the title bar.
+## Keyboard reference
 
-#### Contexts Tab Overrides
-When `DOCKER_HOST` is active (either set via `--host` / `-H` CLI options or the `DOCKER_HOST` environment variable), Docker contexts are overridden. In the **Contexts** tab, DockTUI will display a warning, and context switching will be disabled since `DOCKER_HOST` forces all CLI operations to target the specified endpoint.
-
-### Interactive Settings Editor
-
-Press **Shift+S** from any tab to open the in-app **Settings** view. From here you can edit:
-
-- Refresh interval
-- Docker timeout
-- Theme
-- Log tail limit / step / max
-- CPU alert threshold
-- Exec history cap
-- Exec presets (one per line)
-- Log highlight patterns (`label=regex` per line)
-
-Press **S** to save (writes to `~/.config/docktui/config.json`) and apply changes immediately, or **Esc** to discard.
-
-### Hotkeys & Keyboard Navigation
-
-#### Global Controls
+### Global Controls
 - **`Tab` or `1`-`6`**: Switch between **Containers**, **Compose**, **Images**, **Volumes**, **Networks**, and **Contexts** tabs.
 - **`↑` / `↓` (Arrow Keys) or Mouse Scroll Wheel**: Navigate list items and scroll text logs.
 - **`G`**: Force refresh data.
@@ -197,8 +251,10 @@ Press **S** to save (writes to `~/.config/docktui/config.json`) and apply change
 - **`?`**: Open the in-app keyboard help screen.
 - **`Q`**: Exit DockTUI.
 
-#### Containers & Compose Tabs
-- **`Ctrl+S`**: Bulk Start or Stop all containers matching the active filter.
+### Containers & Compose Tabs
+- **`Ctrl+S`**: Bulk start or stop every container matching the active filter/state (asks for confirmation, runs as one `docker stop`/`docker start`).
+- **`Ctrl+<letter>`**: Run your own `hotkey_overlays` command in the selected container.
+- **`Shift+P`**: Unpin the pinned logs/details pane.
 - **`S`**: Start or Stop the selected container.
 - **`S` on a Compose project row**: Start or stop all containers in that project group.
 - **`R`**: Restart the selected container.
@@ -216,28 +272,28 @@ Press **S** to save (writes to `~/.config/docktui/config.json`) and apply change
 - **`Y`**: Cycle state filter.
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
 
-#### Images Tab
+### Images Tab
 - **`D`**: Delete the selected image (asks for confirmation).
 - **`F`**: Open the **Registry Search & Pull** dialog (Docker Hub).
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
 
-#### Volumes Tab
+### Volumes Tab
 - **`D`**: Delete the selected volume (asks for confirmation).
-- **`F`**: Open the **Volume File Browser**.
+- **`Shift+F`**: Open the **Volume File Browser**.
 - **`P`**: Open **System Disk Usage & Cleanup Dashboard**.
 
-#### Networks Tab
+### Networks Tab
 - **`D`**: Delete the selected network (asks for confirmation).
 
-#### Contexts Tab
+### Contexts Tab
 - **`U`**: Switch active Docker context to the selected context.
 - **`N`**: Add a new endpoint (`name|host|description`) and activate it.
 
-#### In-View Navigation (Logs, Inspect, Exec, Details, Top, System, Settings, Search, Pull, Files Views)
+### In-View Navigation (Logs, Inspect, Exec, Details, Top, System, Settings, Search, Pull, Files Views)
 - **`↑` / `↓` (Arrow Keys) or Mouse Scroll Wheel**: Scroll content.
 - **`Esc` or View Key**: Return back to the main dashboard.
 - **Logs View Features**:
-  - `P`: Pin the logs view to the bottom half of the terminal (Detachable Panes) and return to the main dashboard.
+  - `P`: Pin the logs under the dashboard (they keep following live) and return to the container list; `Shift+P` unpins.
   - `F`: Toggle follow mode to keep refreshing and pinning logs to the newest lines.
   - `Space`: Pause follow mode.
   - `/`: Search/filter logs for specific terms.
@@ -276,57 +332,55 @@ Press **S** to save (writes to `~/.config/docktui/config.json`) and apply change
   - `O`: Export the file list to a file.
   - `Esc`: Return to the dashboard.
 
----
+## Troubleshooting
 
-## Technical Architecture
+Start with **`docktui doctor`** — it checks every item below and prints the fix.
 
-DockTUI interfaces directly with the local Docker daemon by wrapping the `docker` command-line utility via subprocess execution. This guarantees that your existing Docker configurations, permissions, and security context are preserved without requiring complex SDK setups or elevated privilege daemons.
+| Symptom | Fix |
+| --- | --- |
+| `Cannot connect to the Docker daemon` | Start Docker Desktop / `sudo systemctl start docker`. |
+| `permission denied … docker.sock` | `sudo usermod -aG docker $USER`, then log out and back in (or use rootless Docker). |
+| Remote host hangs on start | SSH is waiting for a password or host-key prompt. Use key auth and `ssh admin@host` once to accept the key. |
+| `docktui: command not found` | Your Python scripts directory is not on `PATH`; use `pipx`, or run `python -m docktui`. |
+| Colors look wrong / you want none | `--theme light`, `--theme high-contrast`, or `--no-color` (`NO_COLOR=1`). |
+| Commands time out on a slow host | Increase `--docker-timeout` (or `docker_timeout` in the config). |
 
-It implements a non-blocking cross-platform input capturing loop using:
-- `msvcrt` on Windows.
-- `select`, `termios`, and `tty` on Unix systems (Linux/macOS).
+## How it works
 
-DockTUI's internals are split across focused modules:
-- `docker_client.py` — subprocess wrapper with `DOCKER_HOST` parsing, per-instance host override, and helpers for every `docker` command used by the dashboard.
-- `config.py` — `Config` dataclass for the JSON config file with load/save and validation.
-- `constants.py` / `enums.py` — single source of truth for theme names, tabs, defaults, and view modes.
-- `screen.py` / `styles.py` — terminal-size helpers, the standard `╔══╗…╚══╝` frame, ANSI theme colors, and string truncation utilities.
-- `keymap.py` / `dialogs.py` — typed keymap registry and a small `DialogResult` value object that replaces the legacy inline `start_input` flow.
-- `log_stream.py` — a reusable `LineStreamer` (background thread + line buffer) used by both log follow and image pull progress.
-- `tui.py` — the dashboard orchestrator; each view is rendered by a single `draw_*` method and dispatched through a key-handler table.
+DockTUI wraps the `docker` CLI via `subprocess`, so your existing configuration, permissions and security context are preserved without an SDK or a privileged helper. Input is read non-blockingly with `msvcrt` on Windows and `termios`/`select` on Unix.
 
----
+| Module | Responsibility |
+| --- | --- |
+| `cli.py` | Argument parsing, sub-commands and dashboard start-up |
+| `report.py` | Pure functions behind `status` / `check` (health parsing, rules, text/JSON output) |
+| `doctor.py` | Environment diagnostics |
+| `docker_client.py` | `docker` subprocess wrapper, `DOCKER_HOST` parsing, per-instance host override |
+| `config.py` | `Config` dataclass: lookup paths, load/validate/save |
+| `tui.py` | Dashboard orchestrator: one `draw_*` method per view, key-handler table |
+| `log_stream.py` | Background `LineStreamer` for log follow and image pulls |
+| `screen.py` / `styles.py` / `keymap.py` / `dialogs.py` | Layout helpers, themes, key bindings, input dialogs |
 
-## Running Tests
-
-DockTUI includes an isolated unit test suite covering client operations via subprocess mocking, meaning you can run tests without a running Docker daemon:
+## Development
 
 ```bash
-python -m unittest discover tests
+git clone https://github.com/strmax195-hue/docktui.git
+cd docktui
+pip install -e ".[dev]"
+pre-commit install        # optional: ruff + mypy on every commit
+
+pytest                    # unit tests; no Docker daemon required (subprocess is mocked)
+ruff check . && ruff format --check .
+mypy
 ```
 
-On Windows, `py -m unittest discover tests` also works when the Python launcher is installed.
+The screenshots in this README are generated from the real UI: `scripts/demo/up.sh` starts a demo environment and `python scripts/screenshots.py` (needs `pip install pyte`) re-renders `assets/screenshot-*.svg`.
 
-The CI matrix runs the suite on Linux, macOS, and Windows across Python 3.8, 3.10, 3.12, and 3.13, and a separate `lint` job runs `ruff check .` against the codebase.
+CI runs the tests on Linux, macOS and Windows with Python 3.9–3.14, lint and type checks, CodeQL, and an integration job that exercises `status`/`check`/`doctor` against a real Docker daemon.
 
----
+See [CONTRIBUTING.md](CONTRIBUTING.md) to get started, [ROADMAP.md](ROADMAP.md) for what's next, and [CHANGELOG.md](CHANGELOG.md) for release notes. Maintainers: [docs/release-checklist.md](docs/release-checklist.md).
 
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for planned improvements, including richer Compose actions, detail views, export workflows, and theme polish.
-
-## Releases
-
-Release notes live in [CHANGELOG.md](CHANGELOG.md). Maintainers can use [docs/release-checklist.md](docs/release-checklist.md) when cutting GitHub releases.
-
----
-
-## Contributing
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to help improve DockTUI.
-
----
+If DockTUI saves you a few `docker ps` a day, a ⭐ on GitHub helps other admins find it.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).

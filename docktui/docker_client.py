@@ -3,7 +3,7 @@ import os
 import shlex
 import shutil
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 
 def _format_timeout_message(seconds: float, action: str) -> str:
@@ -49,18 +49,18 @@ class DockerClient:
         """
         self._host_override = host
 
-    def _env(self) -> Optional[Dict[str, str]]:
+    def _env(self) -> Optional[dict[str, str]]:
         if not self._host_override:
             return None
         return {**os.environ, "DOCKER_HOST": self._host_override}
 
-    def parse_docker_host(self) -> Optional[Dict[str, str]]:
+    def parse_docker_host(self) -> Optional[dict[str, str]]:
         """Parse DOCKER_HOST into protocol/user/host/port/display parts."""
         host_str = self.docker_host
         if not host_str:
             return None
 
-        parsed: Dict[str, str] = {
+        parsed: dict[str, str] = {
             "original": host_str,
             "protocol": "",
             "host": "",
@@ -107,7 +107,7 @@ class DockerClient:
                 else:
                     parsed["host"] = host_port
 
-            display_parts: List[str] = []
+            display_parts: list[str] = []
             if parsed["user"]:
                 display_parts.append(f"{parsed['user']}@")
             display_parts.append(parsed["host"])
@@ -119,7 +119,7 @@ class DockerClient:
 
     # ------------------------------------------------------------------ subprocess
 
-    def _run(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
+    def _run(self, cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
         """Run a Docker CLI command with default timeout and per-instance env."""
         kwargs.setdefault("timeout", self.timeout)
         env = kwargs.pop("env", None) or self._env()
@@ -129,7 +129,7 @@ class DockerClient:
 
     def _capture(
         self,
-        cmd: List[str],
+        cmd: list[str],
         action: str = "running command",
     ) -> str:
         """Run a `docker` command and return its text output, normalised on errors."""
@@ -158,9 +158,9 @@ class DockerClient:
 
     def _run_capture(
         self,
-        cmd: List[str],
+        cmd: list[str],
         action: str = "running command",
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Run a `docker` command returning ``(success, text)``.
 
         The text is stdout when available, otherwise stderr. ``success`` is
@@ -190,13 +190,17 @@ class DockerClient:
         stderr = (res.stderr or "") if res.stderr is not None else ""
         return True, stdout or stderr or ""
 
-    def _bool(self, cmd: List[str], action: str) -> Tuple[bool, str]:
+    def _bool(
+        self, cmd: list[str], action: str, timeout: Optional[float] = None
+    ) -> tuple[bool, str]:
         """Run a `docker` command returning `(True, "")` on success, `(False, msg)` otherwise."""
         if not self.is_docker_installed():
             return False, "Docker not installed."
+        effective_timeout = timeout or self.timeout
         try:
             res = self._run(
                 cmd,
+                timeout=effective_timeout,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -204,7 +208,7 @@ class DockerClient:
                 errors="replace",
             )
         except subprocess.TimeoutExpired:
-            return False, _format_timeout_message(self.timeout, action)
+            return False, _format_timeout_message(effective_timeout, action)
         except Exception as e:
             return False, f"Error {action}: {e}"
         if res.returncode == 0:
@@ -214,9 +218,9 @@ class DockerClient:
         text = (stderr + stdout).strip()
         return False, text or f"Failed to {action}."
 
-    def _parse_labels(self, labels: str) -> Dict[str, str]:
+    def _parse_labels(self, labels: str) -> dict[str, str]:
         """Parse Docker's comma-separated key=value labels into a dict."""
-        result: Dict[str, str] = {}
+        result: dict[str, str] = {}
         for item in labels.split(","):
             if "=" in item:
                 key, value = item.split("=", 1)
@@ -241,7 +245,7 @@ class DockerClient:
 
     # ------------------------------------------------------------------ containers
 
-    def list_containers(self) -> List[Dict[str, str]]:
+    def list_containers(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
             return []
 
@@ -258,7 +262,7 @@ class DockerClient:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
 
-        containers: List[Dict[str, str]] = []
+        containers: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -282,7 +286,7 @@ class DockerClient:
             )
         return containers
 
-    def get_container_stats(self) -> Dict[str, Dict[str, str]]:
+    def get_container_stats(self) -> dict[str, dict[str, str]]:
         if not self.is_docker_installed():
             return {}
 
@@ -299,14 +303,16 @@ class DockerClient:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return {}
 
-        stats: Dict[str, Dict[str, str]] = {}
+        stats: dict[str, dict[str, str]] = {}
         for line in res.stdout.strip().split("\n"):
             if not line:
                 continue
             parts = line.split("|")
             if len(parts) < 5:
                 continue
-            stats[parts[0]] = {
+            # Newer Docker releases print the full 64-char ID for `.Container`
+            # while `docker ps` prints the 12-char short ID; normalise to short.
+            stats[parts[0][:12]] = {
                 "cpu": parts[1],
                 "memory": parts[2],
                 "mem_perc": parts[3],
@@ -319,6 +325,23 @@ class DockerClient:
 
     def stop_container(self, container_id: str) -> bool:
         return self._bool([str(self.docker_bin), "stop", container_id], f"stop {container_id}")[0]
+
+    def bulk_container_action(self, action: str, container_ids: list[str]) -> tuple[bool, str]:
+        """Run ``docker start|stop|restart id1 id2 ...`` as one command.
+
+        Docker processes the IDs concurrently, which is much faster than one
+        call per container when stopping a whole stack.
+        """
+        if action not in ("start", "stop", "restart"):
+            return False, f"Unsupported bulk action: {action}"
+        if not container_ids:
+            return True, ""
+        return self._bool(
+            [str(self.docker_bin), action, *container_ids],
+            f"{action} {len(container_ids)} containers",
+            # `docker stop` waits up to 10s per container for a graceful exit.
+            timeout=max(self.timeout, 60.0),
+        )
 
     def restart_container(self, container_id: str) -> bool:
         return self._bool(
@@ -341,7 +364,7 @@ class DockerClient:
         )
         return out or "No process data."
 
-    def rename_container(self, container_id: str, new_name: str) -> Tuple[bool, str]:
+    def rename_container(self, container_id: str, new_name: str) -> tuple[bool, str]:
         success, err = self._bool(
             [str(self.docker_bin), "rename", container_id, new_name],
             f"rename container to {new_name}",
@@ -355,7 +378,7 @@ class DockerClient:
         container_id: str,
         cpus: Optional[float] = None,
         memory_bytes: Optional[int] = None,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Apply live CPU/memory limits via `docker update`."""
         if not self.is_docker_installed():
             return False, "Docker not installed."
@@ -377,12 +400,12 @@ class DockerClient:
         source_id: str,
         new_name: str,
         image: str,
-        command: Optional[List[str]] = None,
-        env: Optional[List[str]] = None,
-        port_bindings: Optional[List[str]] = None,
-        volumes: Optional[List[str]] = None,
+        command: Optional[list[str]] = None,
+        env: Optional[list[str]] = None,
+        port_bindings: Optional[list[str]] = None,
+        volumes: Optional[list[str]] = None,
         detach: bool = True,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Spawn a new container that mirrors `source_id`'s configuration."""
         if not self.is_docker_installed():
             return False, "Docker not installed."
@@ -423,7 +446,7 @@ class DockerClient:
         except (subprocess.TimeoutExpired, Exception):
             return ""
 
-    def list_contexts(self) -> List[Dict[str, str]]:
+    def list_contexts(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
             return []
         cmd = [
@@ -437,7 +460,7 @@ class DockerClient:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
-        contexts: List[Dict[str, str]] = []
+        contexts: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -454,7 +477,7 @@ class DockerClient:
             )
         return contexts
 
-    def use_context(self, context_name: str) -> Tuple[bool, str]:
+    def use_context(self, context_name: str) -> tuple[bool, str]:
         if not self.is_docker_installed():
             return False, "Docker not installed."
         success, msg = self._run_capture(
@@ -465,7 +488,7 @@ class DockerClient:
             return False, msg
         return True, f"Switched Docker context to {context_name}."
 
-    def create_context(self, name: str, host: str, description: str = "") -> Tuple[bool, str]:
+    def create_context(self, name: str, host: str, description: str = "") -> tuple[bool, str]:
         if not self.is_docker_installed():
             return False, "Docker not installed."
         cmd = [str(self.docker_bin), "context", "create", name, "--docker", f"host={host}"]
@@ -476,7 +499,7 @@ class DockerClient:
             return False, msg
         return True, f"Created context {name}."
 
-    def remove_context(self, name: str) -> Tuple[bool, str]:
+    def remove_context(self, name: str) -> tuple[bool, str]:
         if not self.is_docker_installed():
             return False, "Docker not installed."
         success, msg = self._run_capture(
@@ -487,7 +510,7 @@ class DockerClient:
             return False, msg
         return True, f"Removed context {name}."
 
-    def inspect_context(self, name: str) -> Dict[str, str]:
+    def inspect_context(self, name: str) -> dict[str, str]:
         if not self.is_docker_installed():
             return {}
         try:
@@ -575,7 +598,7 @@ class DockerClient:
 
     # ------------------------------------------------------------------ images
 
-    def list_images(self) -> List[Dict[str, str]]:
+    def list_images(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
             return []
         cmd = [
@@ -588,7 +611,7 @@ class DockerClient:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
-        images: List[Dict[str, str]] = []
+        images: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -605,7 +628,7 @@ class DockerClient:
             )
         return images
 
-    def remove_image(self, image_id: str) -> Tuple[bool, str]:
+    def remove_image(self, image_id: str) -> tuple[bool, str]:
         success, msg = self._run_capture(
             [str(self.docker_bin), "rmi", image_id],
             action=f"removing image {image_id}",
@@ -614,7 +637,7 @@ class DockerClient:
             return True, f"Successfully removed image {image_id}."
         return False, msg or f"Failed to remove image {image_id}."
 
-    def search_images(self, query: str, limit: int = 25) -> List[Dict[str, str]]:
+    def search_images(self, query: str, limit: int = 25) -> list[dict[str, str]]:
         """Search Docker Hub (or the configured registry) for `query`."""
         if not self.is_docker_installed():
             return []
@@ -634,7 +657,7 @@ class DockerClient:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
-        results: List[Dict[str, str]] = []
+        results: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -652,7 +675,7 @@ class DockerClient:
             )
         return results
 
-    def pull_image_args(self, repository: str) -> List[str]:
+    def pull_image_args(self, repository: str) -> list[str]:
         """Return the command used to pull `repository` (used by `LineStreamer`)."""
         if not self.is_docker_installed():
             return []
@@ -679,7 +702,7 @@ class DockerClient:
 
     # ------------------------------------------------------------------ volumes
 
-    def list_volumes(self) -> List[Dict[str, str]]:
+    def list_volumes(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
             return []
         cmd = [str(self.docker_bin), "volume", "ls", "--format", "{{.Name}}|{{.Driver}}|{{.Scope}}"]
@@ -687,7 +710,7 @@ class DockerClient:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
-        volumes: List[Dict[str, str]] = []
+        volumes: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -703,7 +726,7 @@ class DockerClient:
             )
         return volumes
 
-    def remove_volume(self, volume_name: str) -> Tuple[bool, str]:
+    def remove_volume(self, volume_name: str) -> tuple[bool, str]:
         success, msg = self._run_capture(
             [str(self.docker_bin), "volume", "rm", volume_name],
             action=f"removing volume {volume_name}",
@@ -712,7 +735,7 @@ class DockerClient:
             return True, f"Successfully removed volume {volume_name}."
         return False, msg or f"Failed to remove volume {volume_name}."
 
-    def inspect_volume(self, name: str) -> Dict[str, str]:
+    def inspect_volume(self, name: str) -> dict[str, str]:
         if not self.is_docker_installed():
             return {}
         try:
@@ -736,7 +759,7 @@ class DockerClient:
             "scope": entry.get("Scope", ""),
         }
 
-    def list_volume_contents(self, name: str, path: str = "/") -> List[Dict[str, str]]:
+    def list_volume_contents(self, name: str, path: str = "/") -> list[dict[str, str]]:
         """Best-effort directory listing of a volume via `docker run --rm`.
 
         We use a tiny Alpine container and `ls -la` so the output is identical
@@ -760,7 +783,7 @@ class DockerClient:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
-        entries: List[Dict[str, str]] = []
+        entries: list[dict[str, str]] = []
         for line in res.stdout.splitlines():
             line = line.rstrip()
             if not line or line.startswith("total "):
@@ -783,7 +806,7 @@ class DockerClient:
 
     # ------------------------------------------------------------------ networks
 
-    def list_networks(self) -> List[Dict[str, str]]:
+    def list_networks(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
             return []
         cmd = [
@@ -797,7 +820,7 @@ class DockerClient:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
-        networks: List[Dict[str, str]] = []
+        networks: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -814,7 +837,7 @@ class DockerClient:
             )
         return networks
 
-    def remove_network(self, network_name: str) -> Tuple[bool, str]:
+    def remove_network(self, network_name: str) -> tuple[bool, str]:
         success, msg = self._run_capture(
             [str(self.docker_bin), "network", "rm", network_name],
             action=f"removing network {network_name}",
@@ -825,7 +848,7 @@ class DockerClient:
 
     # ------------------------------------------------------------------ details
 
-    def get_container_details(self, container_id: str) -> Dict[str, str]:
+    def get_container_details(self, container_id: str) -> dict[str, str]:
         """Return a human-friendly summary of container inspection data."""
         raw = self.inspect_container(container_id)
         try:
@@ -841,7 +864,7 @@ class DockerClient:
         networks = network_settings.get("Networks") or {}
         ports = network_settings.get("Ports") or {}
 
-        port_lines: List[str] = []
+        port_lines: list[str] = []
         for container_port, bindings in ports.items():
             if not bindings:
                 port_lines.append(container_port)
@@ -851,7 +874,7 @@ class DockerClient:
                 host_port = binding.get("HostPort", "")
                 port_lines.append(f"{host_ip}:{host_port} -> {container_port}".strip(":"))
 
-        mount_lines: List[str] = []
+        mount_lines: list[str] = []
         for mount in mounts:
             source = mount.get("Source") or mount.get("Name") or ""
             target = mount.get("Destination") or ""
@@ -861,7 +884,7 @@ class DockerClient:
         env = config.get("Env") or []
         labels = config.get("Labels") or {}
 
-        ip_lines: List[str] = []
+        ip_lines: list[str] = []
         for net_name, net_data in networks.items():
             ip = net_data.get("IPAddress", "")
             gateway = net_data.get("Gateway", "")
@@ -916,7 +939,7 @@ class DockerClient:
         out = self._capture(cmd, action="executing command")
         return out or "(Command executed with no output)"
 
-    def run_compose_cmd(self, project_name: str, config_file: str, action: str) -> Tuple[bool, str]:
+    def run_compose_cmd(self, project_name: str, config_file: str, action: str) -> tuple[bool, str]:
         if not self.is_docker_installed():
             return False, "Docker not installed."
 
@@ -965,7 +988,7 @@ class DockerClient:
 
         service_name = name.replace("-", "_").lower() or "myservice"
 
-        lines: List[str] = [
+        lines: list[str] = [
             "version: '3.8'",
             "services:",
             f"  {service_name}:",
@@ -1031,7 +1054,7 @@ class DockerClient:
                 lines.append(f"      - {bind}")
 
         env = config.get("Env") or []
-        env_lines: List[str] = []
+        env_lines: list[str] = []
         for entry in env:
             if "=" in entry:
                 k, v = entry.split("=", 1)

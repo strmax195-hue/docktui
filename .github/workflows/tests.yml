@@ -6,6 +6,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unittest:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -14,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.10", "3.12", "3.13"]
+        python-version: ["3.9", "3.11", "3.13", "3.14"]
 
     steps:
       - name: Checkout
@@ -24,15 +31,63 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install package and test dependencies
         run: python -m pip install -e .[dev]
 
       - name: Run unit tests with pytest
-        run: pytest --cov=docktui tests/
+        run: pytest --cov=docktui --cov-report=term tests/
+
+      - name: CLI smoke test
+        run: |
+          docktui --version
+          docktui --help
+          docktui config show
+
+  integration:
+    name: Integration (real Docker daemon)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install DockTUI
+        run: python -m pip install .
+
+      - name: Start sample containers
+        run: |
+          docker run -d --name ci-healthy --health-cmd "true" --health-interval 1s busybox sleep 600
+          docker run -d --name ci-unhealthy --health-cmd "false" --health-interval 1s --health-retries 1 busybox sleep 600
+          docker run --name ci-crashed busybox sh -c "exit 3" || true
+          sleep 5
+
+      - name: docktui doctor
+        run: docktui doctor || true
+
+      - name: docktui status
+        run: |
+          docktui status
+          docktui status --json | python -c "import json,sys; rows=json.load(sys.stdin); assert {r['name'] for r in rows} >= {'ci-healthy','ci-unhealthy','ci-crashed'}, rows"
+
+      - name: docktui check reports CRITICAL (exit 2)
+        run: |
+          set +e
+          docktui check
+          code=$?
+          set -e
+          test "$code" -eq 2
+
+      - name: docktui check passes when problems are excluded (exit 0)
+        run: docktui check --exclude ci-unhealthy --exclude ci-crashed --require 'ci-healthy'
 
   lint:
-    name: Ruff lint
+    name: Lint & typecheck
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,7 +99,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install linters
-        run: python -m pip install "ruff>=0.5.0" "mypy>=1.10.0" types-requests
+        run: python -m pip install "ruff>=0.5.0" "mypy>=1.10.0"
 
       - name: Run ruff check
         run: ruff check .
@@ -53,4 +108,4 @@ jobs:
         run: ruff format --check .
 
       - name: Run mypy
-        run: mypy docktui
+        run: mypy

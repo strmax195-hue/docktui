@@ -1,25 +1,25 @@
-# Optional PyPI publishing
+# PyPI publishing
 
-DockTUI is currently documented as installable from GitHub:
+DockTUI is currently installed from GitHub:
 
 ```bash
-pip install git+https://github.com/strmax195-hue/docktui.git
+pipx install git+https://github.com/strmax195-hue/docktui.git
 ```
 
-PyPI publishing is optional. Use this guide only if you decide to make `pip install docktui` available later. The package has no runtime dependencies; the optional `dev` extra only installs build and upload tools.
+Publishing to PyPI makes `pipx install docktui` / `pip install docktui` work. The package has no runtime dependencies; the `dev` extra only installs build, lint and test tools.
 
-## Trusted Publishing option
+## Trusted Publishing (recommended)
 
-The repository release workflow currently builds package artifacts only. To publish to PyPI through Trusted Publishing later, add the official `pypa/gh-action-pypi-publish` step back to `.github/workflows/release.yml`.
+`.github/workflows/publish.yml` builds the package and uploads it with `pypa/gh-action-pypi-publish` whenever a GitHub Release is published. It uses PyPI Trusted Publishing, so no API token is stored in GitHub. **Until the one-time setup below is done, that job fails on every release** (the `Release` workflow that attaches the wheel to the GitHub release is unaffected).
 
-One-time PyPI setup:
+One-time setup:
 
-1. Open your PyPI project settings.
-2. Add a trusted publisher for `strmax195-hue/docktui`.
-3. Use workflow name `Release`.
-4. Use environment `pypi`.
+1. Sign in to PyPI and open *Your projects → Publishing* (for a new project: "Add a new pending publisher").
+2. Owner `strmax195-hue`, repository `docktui`, workflow name `publish.yml`, environment `pypi`.
+3. In GitHub, create the `pypi` environment (*Settings → Environments*), optionally with required reviewers.
+4. Publish the next GitHub Release; the package appears on PyPI.
 
-After that, a GitHub Release can publish the same version to PyPI without storing an API token in GitHub secrets, once the publish step is restored in the release workflow.
+After the first upload, add the PyPI badge and `pipx install docktui` back to the README.
 
 ## Manual setup
 

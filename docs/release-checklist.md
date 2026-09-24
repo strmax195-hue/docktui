@@ -2,12 +2,14 @@
 
 Use this checklist when preparing a GitHub release.
 
-1. Update `version` in `pyproject.toml`.
+1. Update `__version__` in `docktui/__init__.py` (the only place the version lives; `pyproject.toml` reads it).
 2. Update `CHANGELOG.md` with the release date and highlights.
 3. Run tests:
 
    ```bash
-   python -m unittest discover tests
+   pytest
+   ruff check . && ruff format --check .
+   mypy
    ```
 
 4. Build and check the package:
@@ -27,6 +29,6 @@ Use this checklist when preparing a GitHub release.
    ```
 
 7. Create a GitHub release from the tag and paste the matching changelog section.
-8. Confirm the `Release` workflow succeeds and release artifacts are attached.
+8. Confirm the `Release` workflow succeeds: it fails if the tag does not match `__version__`, and attaches the wheel and sdist to the GitHub release.
 
 PyPI publishing is optional. If you decide to publish later, use `docs/publishing.md`.

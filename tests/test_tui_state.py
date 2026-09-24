@@ -326,3 +326,105 @@ if __name__ == "__main__":
     from unittest.mock import mock_open, patch
 
     unittest.main()
+
+
+class TestAdminWorkflows(unittest.TestCase):
+    def _dashboard(self):
+        dashboard = ContainerDashboard()
+        dashboard.refresh_data = lambda *a, **k: None
+        dashboard.containers = [
+            {"id": "c1", "name": "api-1", "state": "running", "status": "Up", "image": "api"},
+            {"id": "c2", "name": "api-2", "state": "running", "status": "Up", "image": "api"},
+            {
+                "id": "c3",
+                "name": "api-3",
+                "state": "exited",
+                "status": "Exited (0)",
+                "image": "api",
+            },
+        ]
+        return dashboard
+
+    def test_bulk_stop_asks_and_stops_running_containers(self):
+        dashboard = self._dashboard()
+        with (
+            patch.object(dashboard, "prompt_user", return_value="y"),
+            patch.object(
+                dashboard.client, "bulk_container_action", return_value=(True, "")
+            ) as bulk,
+        ):
+            dashboard._handle_key_main("\x13")
+        bulk.assert_called_once_with("stop", ["c1", "c2"])
+
+    def test_bulk_start_can_be_canceled(self):
+        dashboard = self._dashboard()
+        dashboard.containers = dashboard.containers[2:]
+        with (
+            patch.object(dashboard, "prompt_user", return_value="n"),
+            patch.object(dashboard.client, "bulk_container_action") as bulk,
+        ):
+            dashboard.bulk_start_stop()
+        bulk.assert_not_called()
+        self.assertIn("canceled", dashboard.status_message)
+
+    def test_hotkey_overlay_runs_command_in_selected_container(self):
+        dashboard = self._dashboard()
+        dashboard.config.hotkey_overlays = {"ctrl+l": "ls -l"}
+        with patch.object(dashboard.client, "exec_command", return_value="a\nb") as run:
+            handled = dashboard._handle_key_main("\x0c")
+        self.assertTrue(handled)
+        run.assert_called_once_with("c1", "ls -l")
+        self.assertEqual(dashboard.view_mode, ViewMode.EXEC)
+        self.assertEqual(dashboard.exec_output_lines, ["a", "b"])
+
+    def test_pin_and_unpin_logs_pane(self):
+        dashboard = self._dashboard()
+        dashboard.active_container = dashboard.containers[0]
+        dashboard.view_mode = ViewMode.LOGS
+        dashboard._handle_key_logs("p")
+        self.assertEqual(dashboard.view_mode, ViewMode.MAIN)
+        self.assertEqual(dashboard.pinned_view, ViewMode.LOGS)
+        self.assertTrue(dashboard.log_follow)
+        self.assertIn("api-1", dashboard._pinned_label())
+        dashboard._handle_key_main("P")
+        self.assertIsNone(dashboard.pinned_view)
+
+
+class TestLogColoringAndThemes(unittest.TestCase):
+    def tearDown(self):
+        from docktui import tui
+
+        tui.apply_theme_colors("dark")
+
+    def test_severity_colors_and_highlights(self):
+        import re
+
+        from docktui import tui
+
+        tui.apply_theme_colors("dark")
+        self.assertTrue(tui.colorize_log_line("12:00 ERROR boom").startswith(tui.RED))
+        self.assertTrue(tui.colorize_log_line("level=warn msg=slow").startswith(tui.YELLOW))
+        self.assertEqual(tui.colorize_log_line("all good"), "all good")
+        highlighted = tui.colorize_log_line("user login ok", re.compile("login", re.I))
+        self.assertIn(f"{tui.MAGENTA}{tui.BOLD}login", highlighted)
+
+    def test_theme_switch_reaches_dashboard_module(self):
+        from docktui import screen, tui
+
+        tui.apply_theme_colors("light")
+        self.assertEqual(tui.CYAN, "\033[34m")
+        self.assertEqual(screen.CYAN, "\033[34m")
+        with patch.dict("os.environ", {"NO_COLOR": "1"}):
+            tui.apply_theme_colors("dark")
+        self.assertEqual(tui.RED, "")
+        self.assertEqual(tui.colorize_log_line("ERROR x"), "ERROR x")
+
+    def test_highlight_toggle_is_case_insensitive(self):
+        dashboard = ContainerDashboard()
+        dashboard.config.log_highlights = [{"label": "err", "pattern": "error"}]
+        dashboard._toggle_log_highlights()
+        self.assertIsNotNone(dashboard.log_highlight_regex.search("ERROR"))
+
+
+if __name__ == "__main__":
+    unittest.main()

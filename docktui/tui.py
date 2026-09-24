@@ -6,6 +6,7 @@ shaping, the help screen, and the modal input flow. Drawing helpers live in
 file; everything else is delegated to small methods that views call.
 """
 
+import contextlib
 import os
 import re
 import shlex
@@ -13,8 +14,11 @@ import signal
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Any, Callable, Optional
 
+from . import screen as _screen_module
+from . import styles as _styles
 from .config import Config
 from .constants import (
     AVAILABLE_TABS,
@@ -27,29 +31,59 @@ from .constants import (
 from .dialogs import DialogResult, apply_dialog_key
 from .docker_client import DockerClient
 from .enums import ComposeAction, StateFilter, ThemeName, ViewMode
-from .keymap import Keymap
+from .keymap import Keymap, resolve_hotkey_overlay
 from .log_stream import LineStreamer
 from .screen import (
     clear_screen,
     draw_frame,
     draw_status_bar,
     get_terminal_size,
+    list_window,
     pad_to_viewport,
     scroll_step,
     slice_viewport,
     truncate,
     viewport_height_for,
+    wrap_hints,
 )
 from .styles import (
     BOLD,
     CYAN,
     GREEN,
+    MAGENTA,
     RED,
     RESET,
     WHITE_ON_BLUE,
     YELLOW,
-    apply_theme_colors,
 )
+
+_THEMED_NAMES = (
+    "RESET",
+    "BOLD",
+    "CYAN",
+    "GREEN",
+    "RED",
+    "YELLOW",
+    "WHITE_ON_BLUE",
+    "BG_DARK_GRAY",
+    "MAGENTA",
+)
+
+
+def apply_theme_colors(theme_name: Optional[str] = None) -> str:
+    """Apply a theme and re-bind the colour names imported by this module and `screen`.
+
+    `from .styles import RED` copies the value at import time, so without this
+    re-binding theme switches (`M`, `--theme`) and `NO_COLOR` never reached the
+    dashboard.
+    """
+    name = _styles.apply_theme_colors(theme_name)
+    for namespace in (globals(), vars(_screen_module)):
+        for attr in _THEMED_NAMES:
+            if attr in namespace:
+                namespace[attr] = getattr(_styles, attr)
+    return name
+
 
 # ---------------------------------------------------------------------------
 # Cross-platform keyboard input
@@ -78,6 +112,13 @@ try:
     def init_terminal() -> None:
         os.system("")
 
+    def restore_terminal() -> None:
+        return None
+
+    @contextlib.contextmanager
+    def cooked_terminal() -> Iterator[None]:
+        yield
+
     def get_key_nonblocking() -> Optional[str]:
         if msvcrt.kbhit():  # type: ignore[attr-defined]
             ch = msvcrt.getch()  # type: ignore[attr-defined]
@@ -100,50 +141,116 @@ try:
         return None
 
 except ImportError:  # Unix / macOS
+    import codecs
     import select
     import sys
     import termios
-    import tty
+    from collections import deque
 
     PLATFORM = "unix"
 
+    # The terminal stays in cbreak mode (no echo, no line buffering) for the
+    # whole session. Toggling raw mode around every poll (the old approach)
+    # used TCSAFLUSH, which silently discarded keys pressed between polls and
+    # echoed escape sequences such as arrow keys onto the screen.
+    _ORIGINAL_TERMIOS: Optional[list[Any]] = None
+    _KEY_BUFFER: "deque[str]" = deque()
+    _DECODER = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
     def init_terminal() -> None:
+        global _ORIGINAL_TERMIOS
+        if not sys.stdin.isatty():
+            return
+        fd = sys.stdin.fileno()
+        if _ORIGINAL_TERMIOS is None:
+            _ORIGINAL_TERMIOS = termios.tcgetattr(fd)
+        attrs = termios.tcgetattr(fd)
+        # IXON off so Ctrl+S reaches the app; ICRNL off so Enter arrives as "\r".
+        attrs[0] &= ~(termios.IXON | termios.ICRNL)
+        attrs[3] &= ~(termios.ICANON | termios.ECHO)
+        attrs[6][termios.VMIN] = 1
+        attrs[6][termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+
+    def restore_terminal() -> None:
+        global _ORIGINAL_TERMIOS
+        if _ORIGINAL_TERMIOS is None:
+            return
+        try:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _ORIGINAL_TERMIOS)
+        except (termios.error, ValueError, OSError):
+            pass
+        _ORIGINAL_TERMIOS = None
+
+    def _fill_key_buffer(timeout: float) -> bool:
+        """Read whatever bytes are pending on stdin into the key buffer."""
+        try:
+            fd = sys.stdin.fileno()
+            rlist, _, _ = select.select([fd], [], [], timeout)
+            if not rlist:
+                return False
+            data = os.read(fd, 1024)
+        except (OSError, ValueError):
+            return False
+        if not data:
+            return False
+        _KEY_BUFFER.extend(_DECODER.decode(data))
+        return True
+
+    def _next_char(timeout: float = 0.05) -> Optional[str]:
+        if not _KEY_BUFFER and not _fill_key_buffer(timeout):
+            return None
+        return _KEY_BUFFER.popleft() if _KEY_BUFFER else None
+
+    def _read_escape_sequence() -> Optional[str]:
+        """Decode the rest of an escape sequence after a leading ESC."""
+        intro = _next_char()
+        if intro is None:
+            return "\x1b"  # a lone Esc key press
+        if intro not in ("[", "O"):
+            _KEY_BUFFER.appendleft(intro)  # Alt+key: report Esc, keep the key
+            return "\x1b"
+        final = _next_char()
+        if final is None:
+            return None
+        if final in ("A", "B"):
+            return "up" if final == "A" else "down"
+        if intro == "[" and final == "M":  # X10 mouse report: 3 more bytes
+            data = "".join(c for c in (_next_char(), _next_char(), _next_char()) if c)
+            if len(data) == 3:
+                cb = ord(data[0])
+                if cb == 96:
+                    return "scroll_up"
+                if cb == 97:
+                    return "scroll_down"
+            return "mouse"
+        # Swallow the remainder of any other CSI sequence (PgUp "5~", F-keys...).
+        while intro == "[" and final is not None and not ("@" <= final <= "~"):
+            final = _next_char()
         return None
 
     def get_key_nonblocking() -> Optional[str]:
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)  # type: ignore
-        try:
-            tty.setraw(fd)  # type: ignore
-            rlist, _, _ = select.select([sys.stdin], [], [], 0.05)
-            if rlist:
-                ch = sys.stdin.read(1)
-                if ch == "\x1b":
-                    rlist2, _, _ = select.select([sys.stdin], [], [], 0.05)
-                    if rlist2:
-                        ch2 = sys.stdin.read(2)
-                        if ch2 == "[A":
-                            return "up"
-                        if ch2 == "[B":
-                            return "down"
-                        if ch2 == "[M":
-                            mouse_data = sys.stdin.read(3)
-                            if len(mouse_data) == 3:
-                                cb = ord(mouse_data[0])
-                                if cb == 96:
-                                    return "scroll_up"
-                                if cb == 97:
-                                    return "scroll_down"
-                            return "mouse"
-                    return "\x1b"
-                if ch in ("\r", "\n"):
-                    return "enter"
-                if ch in ("\x7f", "\b"):
-                    return "backspace"
-                return ch
+        ch = _next_char()
+        if ch is None:
             return None
+        if ch == "\x1b":
+            return _read_escape_sequence()
+        if ch in ("\r", "\n"):
+            return "enter"
+        if ch in ("\x7f", "\b"):
+            return "backspace"
+        return ch
+
+    @contextlib.contextmanager
+    def cooked_terminal() -> Iterator[None]:
+        """Temporarily hand the terminal back in normal (echo, line) mode."""
+        was_managed = _ORIGINAL_TERMIOS is not None
+        restore_terminal()
+        try:
+            yield
         finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)  # type: ignore
+            if was_managed:
+                init_terminal()
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +271,28 @@ def _log_is_error_line(line: str) -> bool:
     return any(keyword in lowered for keyword in ERROR_KEYWORDS)
 
 
+_LOG_ERROR_RE = re.compile(
+    r"\b(?:ERROR|FATAL|CRITICAL|PANIC|EMERG|ALERT)\b|level=(?:error|fatal|crit)|\bTraceback\b"
+)
+_LOG_WARN_RE = re.compile(r"\b(?:WARN|WARNING)\b|level=warn")
+
+
+def colorize_log_line(line: str, highlight: Optional[re.Pattern] = None) -> str:
+    """Colour a log line by severity and wrap `highlight` matches in bold magenta."""
+    if _LOG_ERROR_RE.search(line):
+        base = RED
+    elif _LOG_WARN_RE.search(line):
+        base = YELLOW
+    else:
+        base = ""
+    text = line
+    if highlight is not None:
+        text = highlight.sub(lambda m: f"{MAGENTA}{BOLD}{m.group(0)}{RESET}{base}", text)
+    if base or text != line:
+        return f"{base}{text}{RESET}"
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Main dashboard
 # ---------------------------------------------------------------------------
@@ -178,7 +307,7 @@ class ContainerDashboard:
         docker_timeout: float = DEFAULT_DOCKER_TIMEOUT,
         docker_host: Optional[str] = None,
         theme: Optional[str] = None,
-        exec_presets: Optional[List[str]] = None,
+        exec_presets: Optional[list[str]] = None,
         log_tail_limit: Optional[int] = None,
         config: Optional[Config] = None,
     ):
@@ -196,19 +325,19 @@ class ContainerDashboard:
         apply_theme_colors(self.theme)
 
         # ---------------------------------------------------------------- state
-        self.tabs: List[str] = list(AVAILABLE_TABS)
-        self.filters: Dict[str, str] = {tab: "" for tab in self.tabs}
-        self.containers: List[Dict[str, str]] = []
-        self.stats: Dict[str, Dict[str, str]] = {}
-        self.images: List[Dict[str, str]] = []
-        self.volumes: List[Dict[str, str]] = []
-        self.networks: List[Dict[str, str]] = []
-        self.contexts: List[Dict[str, str]] = []
-        self.compose_rows: List[Dict[str, Any]] = []
-        self.active_container: Optional[Dict[str, str]] = None
+        self.tabs: list[str] = list(AVAILABLE_TABS)
+        self.filters: dict[str, str] = {tab: "" for tab in self.tabs}
+        self.containers: list[dict[str, str]] = []
+        self.stats: dict[str, dict[str, str]] = {}
+        self.images: list[dict[str, str]] = []
+        self.volumes: list[dict[str, str]] = []
+        self.networks: list[dict[str, str]] = []
+        self.contexts: list[dict[str, str]] = []
+        self.compose_rows: list[dict[str, Any]] = []
+        self.active_container: Optional[dict[str, str]] = None
         self.active_project: Optional[str] = None
         self.active_endpoint: Optional[str] = None
-        self.endpoints: List[Dict[str, str]] = list(self.config.endpoints)
+        self.endpoints: list[dict[str, str]] = list(self.config.endpoints)
 
         self.selected_index = 0
         self.selected_image_index = 0
@@ -232,18 +361,18 @@ class ContainerDashboard:
         self.log_match_index = 0
         self.log_errors_only = False
         self.log_tail_limit = self.config.log_tail_limit
-        self.log_lines: List[str] = []
+        self.log_lines: list[str] = []
         self.log_scroll_index = 0
         self.log_follow = False
         self.last_log_refresh = 0.0
-        self.log_highlight_patterns: List[Tuple[str, str]] = []  # (label, color)
+        self.log_highlight_patterns: list[tuple[str, str]] = []  # (label, color)
         self.log_highlight_regex: Optional[re.Pattern] = None
 
         # ---------------------------------------------------------------- exec
-        self.exec_output_lines: List[str] = []
+        self.exec_output_lines: list[str] = []
         self.exec_scroll_index = 0
         self.exec_command_text = ""
-        self.exec_history: List[str] = []
+        self.exec_history: list[str] = []
 
         # ---------------------------------------------------------------- other
         self.system_info_text = ""
@@ -251,22 +380,22 @@ class ContainerDashboard:
         self.daemon_running = False
         self.last_daemon_check = 0.0
         self.daemon_check_interval = 3.0
-        self.compose_snippet_lines: List[str] = []
+        self.compose_snippet_lines: list[str] = []
         self.compose_snippet_scroll_index = 0
-        self.inspect_lines: List[str] = []
+        self.inspect_lines: list[str] = []
         self.inspect_scroll_index = 0
-        self.details_lines: List[str] = []
+        self.details_lines: list[str] = []
         self.details_scroll_index = 0
-        self.top_lines: List[str] = []
+        self.top_lines: list[str] = []
         self.top_scroll_index = 0
-        self.settings_options: List[Dict[str, Any]] = []
+        self.settings_options: list[dict[str, Any]] = []
         self.settings_index = 0
-        self.pull_lines: List[str] = []
+        self.pull_lines: list[str] = []
         self.pull_scroll_index = 0
         self.pull_image_name = ""
-        self.search_results: List[Dict[str, str]] = []
+        self.search_results: list[dict[str, str]] = []
         self.search_index = 0
-        self.file_entries: List[Dict[str, str]] = []
+        self.file_entries: list[dict[str, str]] = []
         self.file_path = "/"
         self.file_volume_name = ""
         self.file_index = 0
@@ -278,15 +407,17 @@ class ContainerDashboard:
         self.refresh_thread: Optional[threading.Thread] = None
         self.refresh_in_progress = False
         self.log_stream_process: Optional[subprocess.Popen] = None
-        self.log_stream_threads: List[threading.Thread] = []
+        self.log_stream_threads: list[threading.Thread] = []
         self.log_streamer: Optional[LineStreamer] = None
         self.pull_streamer: Optional[LineStreamer] = None
 
         # ---------------------------------------------------------------- modal
         self.input_dialog = DialogResult()
         self.need_redraw = True
-        self.pinned_view = None
-        self.pinned_target = None
+        self.pinned_view: Optional[ViewMode] = None
+        self.pinned_target: Optional[dict[str, str]] = None
+        self.pinned_project: Optional[str] = None
+        self._list_clipped: Optional[tuple[int, int, int]] = None
         self._quit_requested = False
         self._viewport_h = 0
 
@@ -306,7 +437,7 @@ class ContainerDashboard:
         self.filters["compose"] = val
 
     @property
-    def exec_presets(self) -> List[str]:
+    def exec_presets(self) -> list[str]:
         return list(self.config.exec_presets)
 
     # ------------------------------------------------------------- keymap
@@ -442,13 +573,14 @@ class ContainerDashboard:
             if PLATFORM == "windows":
                 while msvcrt.kbhit():  # type: ignore[attr-defined]
                     msvcrt.getch()  # type: ignore[attr-defined]
-            return input().strip()
+            with cooked_terminal():
+                return input().strip()
         except Exception:
             return ""
 
     # ------------------------------------------------------------- export
 
-    def _export_lines_to_file(self, lines: List[str], type_name: str, filepath: str) -> None:
+    def _export_lines_to_file(self, lines: list[str], type_name: str, filepath: str) -> None:
         if not filepath:
             self.set_status("Export canceled: empty path.")
             return
@@ -506,7 +638,7 @@ class ContainerDashboard:
         self.set_status(f"Switched theme to {self.theme}.")
         self.need_redraw = True
 
-    def current_selected_container(self) -> Optional[Dict[str, str]]:
+    def current_selected_container(self) -> Optional[dict[str, str]]:
         if self.current_tab == "containers" and self.containers:
             return self.containers[self.selected_index]
         if self.current_tab == "compose" and self.compose_rows:
@@ -515,7 +647,7 @@ class ContainerDashboard:
                 return row.get("container")  # type: ignore[return-value]
         return None
 
-    def sort_containers(self, containers: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def sort_containers(self, containers: list[dict[str, str]]) -> list[dict[str, str]]:
         if self.state_filter != StateFilter.ALL.value:
             containers = [c for c in containers if c.get("state") == self.state_filter]
         if self.container_filter:
@@ -535,8 +667,8 @@ class ContainerDashboard:
         return sorted(containers, key=lambda c: (c.get("state") != "running", c.get("name", "")))
 
     def build_compose_rows(self) -> None:
-        groups: Dict[str, List[Dict[str, str]]] = {}
-        loose: List[Dict[str, str]] = []
+        groups: dict[str, list[dict[str, str]]] = {}
+        loose: list[dict[str, str]] = []
         for container in self.containers:
             project = container.get("compose_project")
             if project:
@@ -544,7 +676,7 @@ class ContainerDashboard:
             else:
                 loose.append(container)
 
-        rows: List[Dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         for project in sorted(groups):
             project_containers = sorted(
                 groups[project], key=lambda c: (c.get("compose_service", ""), c.get("name", ""))
@@ -614,7 +746,7 @@ class ContainerDashboard:
             return
         self.stop_log_stream()
 
-        cmd: List[str] = []
+        cmd: list[str] = []
         if self.client.docker_bin:
             cmd.append(self.client.docker_bin)
         if container_id is None and project_name:
@@ -639,7 +771,10 @@ class ContainerDashboard:
             if len(self.log_lines) > self.log_tail_limit:
                 self.log_lines.pop(0)
             try:
-                viewport_h = viewport_height_for(get_terminal_size().height)
+                height = get_terminal_size().height
+                viewport_h = viewport_height_for(height)
+                if self.pinned_view == ViewMode.LOGS and self.view_mode != ViewMode.LOGS:
+                    viewport_h = self.split_viewport_height(height)
             except Exception:
                 viewport_h = 18
             self.log_scroll_index = max(0, len(self.log_lines) - viewport_h)
@@ -668,11 +803,11 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- top / details / inspect
 
-    def build_details_lines(self, container_id: str) -> List[str]:
+    def build_details_lines(self, container_id: str) -> list[str]:
         details = self.client.get_container_details(container_id)
         if "error" in details:
             return details["error"].split("\n")
-        lines: List[str] = [
+        lines: list[str] = [
             f"Name: {details.get('name', '')}",
             f"ID: {details.get('id', '')}",
             f"Image: {details.get('image', '')}",
@@ -729,7 +864,7 @@ class ContainerDashboard:
         self.exec_history.insert(0, command)
         self.exec_history = self.exec_history[: self.config.exec_history_cap]
 
-    def start_exec_input(self, container: Dict[str, str]) -> None:
+    def start_exec_input(self, container: dict[str, str]) -> None:
         prompt = f"Command inside {container['name']} (type to search history, or custom): "
 
         def submit(value: str) -> None:
@@ -746,7 +881,7 @@ class ContainerDashboard:
             self.config.save()
             self.set_status(f"Running command: {command}...")
             output = self.client.exec_command(container["id"], command)
-            self.exec_output_lines = output.split("\\n")
+            self.exec_output_lines = output.split("\n")
             self.exec_scroll_index = 0
             self.view_mode = ViewMode.EXEC
 
@@ -872,6 +1007,7 @@ class ContainerDashboard:
             return
 
         self._draw_tab_header(width)
+        self._list_clipped = None
         if self.current_tab == "containers":
             self._draw_containers_tab(width)
         elif self.current_tab == "compose":
@@ -885,7 +1021,14 @@ class ContainerDashboard:
         elif self.current_tab == "contexts":
             self._draw_contexts_tab(width)
 
-        draw_status_bar(self.status_message, width)
+        status = self.status_message
+        if self._list_clipped:
+            start, end, total = self._list_clipped
+            status = f"{status}  [rows {start + 1}-{end} of {total}]"
+        pinned = self._pinned_label()
+        if pinned:
+            status = f"{status}  [pinned: {pinned}, Shift+P to unpin]"
+        draw_status_bar(status, width)
         self._draw_main_footer()
 
     def _draw_tab_header(self, width: int) -> None:
@@ -897,13 +1040,13 @@ class ContainerDashboard:
             "networks": "Networks",
             "contexts": "Contexts",
         }
-        header_parts: List[str] = []
+        header_parts: list[str] = []
         for idx, tab in enumerate(self.tabs, start=1):
             label = f"{tab_labels[tab]} ({idx})"
             header_parts.append(
                 f"{WHITE_ON_BLUE} {label} {RESET}" if tab == self.current_tab else f"[{label}]"
             )
-        filter_bits: List[str] = []
+        filter_bits: list[str] = []
         active_filter = self.filters.get(self.current_tab, "")
         if active_filter:
             filter_bits.append(f"filter: {active_filter}")
@@ -915,6 +1058,29 @@ class ContainerDashboard:
         filter_status = "    [" + " | ".join(filter_bits) + "]" if filter_bits else ""
         print("   ".join(header_parts) + filter_status)
         print("─" * (width - 1))
+
+    def _list_window(self, total: int, selected: int, reserved: int) -> tuple[int, int]:
+        """Visible slice of a dashboard list; `reserved` is the non-list chrome height."""
+        height = get_terminal_size().height
+        if self.pinned_view is not None:
+            height -= self.split_viewport_height(height) + 7
+        start, end = list_window(total, selected, max(3, height - reserved))
+        self._list_clipped = (start, end, total) if (start, end) != (0, total) else None
+        return start, end
+
+    @staticmethod
+    def _state_cell(state: str, row_style: str = "") -> str:
+        """A 10-wide container state cell, coloured unless the row is highlighted."""
+        padded = f"{state:<10}"
+        if row_style:
+            return padded
+        if state == "running":
+            color = GREEN
+        elif state in ("exited", "dead"):
+            color = RED
+        else:
+            color = YELLOW
+        return f"{color}{padded}{RESET}"
 
     def _draw_containers_tab(self, width: int) -> None:
         if not self.containers:
@@ -934,21 +1100,22 @@ class ContainerDashboard:
         header_line = f"{BOLD}{'ID':<12} {truncate('NAME', name_w)} {truncate('IMAGE', image_w)} {'STATE':<10} {truncate('STATUS', status_w)}{RESET}"
         print(header_line)
         print("─" * (width - 1))
-        for idx, c in enumerate(self.containers):
+        start, end = self._list_window(len(self.containers), self.selected_index, reserved=19)
+        for idx, c in list(enumerate(self.containers))[start:end]:
             style = WHITE_ON_BLUE if idx == self.selected_index else ""
             state = c["state"]
-            if state == "running":
-                state_formatted = f"{GREEN}running{RESET}"
-            elif state in ("exited", "dead"):
-                state_formatted = f"{RED}{state}{RESET}"
-            else:
-                state_formatted = f"{YELLOW}{state}{RESET}"
+            padded_state = f"{state:<10}"
+            state_formatted = self._state_cell(state)
+            status_cell = truncate(c["status"], status_w)
+            if "(unhealthy)" in c["status"] or state == "restarting":
+                status_cell = f"{RED}{status_cell}{RESET}"
             if idx == self.selected_index:
-                state_formatted = state
+                state_formatted = padded_state
+                status_cell = truncate(c["status"], status_w)
                 name_str = f"» {c['name']}"
             else:
                 name_str = f"  {c['name']}"
-            line = f"{style}{c['id'][:10]:<12} {truncate(name_str, name_w)} {truncate(c['image'], image_w)} {state_formatted:<10} {truncate(c['status'], status_w)}{RESET}"
+            line = f"{style}{c['id'][:10]:<12} {truncate(name_str, name_w)} {truncate(c['image'], image_w)} {state_formatted} {status_cell}{RESET}"
             print(line)
         print("─" * (width - 1))
 
@@ -983,7 +1150,10 @@ class ContainerDashboard:
             f"{BOLD}{truncate('PROJECT / SERVICE', service_w)} {truncate('CONTAINER', name_w)} {'STATE':<10} {truncate('IMAGE', image_w)}{RESET}"
         )
         print("─" * (width - 1))
-        for idx, row in enumerate(self.compose_rows):
+        start, end = self._list_window(
+            len(self.compose_rows), self.selected_compose_index, reserved=13
+        )
+        for idx, row in list(enumerate(self.compose_rows))[start:end]:
             style = WHITE_ON_BLUE if idx == self.selected_compose_index else ""
             if row["type"] == "project":
                 project = str(row["project"])
@@ -999,7 +1169,8 @@ class ContainerDashboard:
                 print(
                     f"{style}{truncate(marker + service, service_w)} "
                     f"{truncate(container.get('name', ''), name_w)} "
-                    f"{state:<10} {truncate(container.get('image', ''), image_w)}{RESET}"
+                    f"{self._state_cell(state, style)} "
+                    f"{truncate(container.get('image', ''), image_w)}{RESET}"
                 )
 
     def _draw_images_tab(self, width: int) -> None:
@@ -1018,7 +1189,8 @@ class ContainerDashboard:
         header_line = f"{BOLD}{'IMAGE ID':<12} {truncate('REPOSITORY', repo_w)} {truncate('TAG', tag_w)} {truncate('SIZE', size_w)}{RESET}"
         print(header_line)
         print("─" * (width - 1))
-        for idx, img in enumerate(self.images):
+        start, end = self._list_window(len(self.images), self.selected_image_index, reserved=13)
+        for idx, img in list(enumerate(self.images))[start:end]:
             style = WHITE_ON_BLUE if idx == self.selected_image_index else ""
             repo_str = (
                 f"» {img['repository']}"
@@ -1044,7 +1216,8 @@ class ContainerDashboard:
             f"{BOLD}{truncate('VOLUME', name_w)} {truncate('DRIVER', driver_w)} {'SCOPE':<12}{RESET}"
         )
         print("─" * (width - 1))
-        for idx, volume in enumerate(self.volumes):
+        start, end = self._list_window(len(self.volumes), self.selected_volume_index, reserved=13)
+        for idx, volume in list(enumerate(self.volumes))[start:end]:
             style = WHITE_ON_BLUE if idx == self.selected_volume_index else ""
             marker = "» " if idx == self.selected_volume_index else "  "
             print(
@@ -1067,7 +1240,8 @@ class ContainerDashboard:
             f"{BOLD}{'ID':<12} {truncate('NETWORK', name_w)} {truncate('DRIVER', driver_w)} {'SCOPE':<12}{RESET}"
         )
         print("─" * (width - 1))
-        for idx, network in enumerate(self.networks):
+        start, end = self._list_window(len(self.networks), self.selected_network_index, reserved=13)
+        for idx, network in list(enumerate(self.networks))[start:end]:
             style = WHITE_ON_BLUE if idx == self.selected_network_index else ""
             marker = "» " if idx == self.selected_network_index else "  "
             print(
@@ -1096,7 +1270,8 @@ class ContainerDashboard:
             f"{BOLD}{truncate('CONTEXT', name_w)} {'CUR':<5} {truncate('DESCRIPTION', desc_w)} {truncate('ENDPOINT', endpoint_w)}{RESET}"
         )
         print("─" * (width - 1))
-        for idx, context in enumerate(self.contexts):
+        start, end = self._list_window(len(self.contexts), self.selected_context_index, reserved=14)
+        for idx, context in list(enumerate(self.contexts))[start:end]:
             style = WHITE_ON_BLUE if idx == self.selected_context_index else ""
             marker = "» " if idx == self.selected_context_index else "  "
             print(
@@ -1106,41 +1281,32 @@ class ContainerDashboard:
             )
         print("─" * (width - 1))
 
-    def _draw_main_footer(self) -> None:
+    def _main_footer_hints(self) -> str:
         if self.current_tab == "compose":
             row = self.compose_rows[self.selected_compose_index] if self.compose_rows else None
             if row and row.get("type") == "project":
-                print(
-                    f"{CYAN}[U] Up | [D] Down | [B] Build | [R] Restart | [L] Project Logs | [Tab] Switch | [?] Help | [Q] Quit{RESET}"
-                )
+                return "[U] Up | [D] Down | [B] Build | [R] Restart | [L] Project Logs | [Tab] Switch | [?] Help | [Q] Quit"
             else:
-                print(
-                    f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [O] Sort | [Y] State | [Shift+F] Files | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-                )
+                return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "containers":
-            print(
-                f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [C] Clone | [O] Sort | [Y] State | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [Shift+C] Clone | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "images":
-            print(
-                f"{CYAN}[D] Delete | [F] Search & Pull | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[D] Delete | [F] Search & Pull | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "volumes":
-            print(
-                f"{CYAN}[D] Delete | [F] Browse Files | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[D] Delete | [Shift+F] Browse Files | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "networks":
-            print(
-                f"{CYAN}[D] Delete | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
+            return (
+                "[D] Delete | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
             )
         elif self.current_tab == "contexts":
-            print(
-                f"{CYAN}[U] Use | [N] New Endpoint | [Shift+S] Settings | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[U] Use | [N] New Endpoint | [Shift+S] Settings | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit"
         else:
-            print(
-                f"{CYAN}[Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
+
+    def _draw_main_footer(self) -> None:
+        width = get_terminal_size().width
+        for line in wrap_hints(self._main_footer_hints(), width - 1):
+            print(f"{CYAN}{line}{RESET}")
 
     # ------------------------------------------------------------- empty state
 
@@ -1233,8 +1399,10 @@ class ContainerDashboard:
 
         visible, start, end = slice_viewport(self.log_lines, self.log_scroll_index, viewport_height)
         for line in visible:
-            print(line[: width - 1])
+            print(colorize_log_line(line[: width - 1], self.log_highlight_regex))
         pad_to_viewport(len(visible), viewport_height)
+        if getattr(self, "_split_screen_mode", False):
+            return  # pinned pane: the dashboard footer already shows the keys
         print("\n" + "═" * (width - 1))
         print(
             f"{CYAN}[Up/Down] Scroll | [F] Follow | [Space] Pause | [/] Search | [N] Next | [E] Errors | [H] Highlights | [O] Export | [+/-] Limit | [Esc/L] Back{RESET}"
@@ -1245,7 +1413,7 @@ class ContainerDashboard:
     def _draw_scrollable_text_view(
         self,
         title: str,
-        lines: List[str],
+        lines: list[str],
         scroll_index_attr: str,
         back_keys: str,
     ) -> None:
@@ -1353,7 +1521,7 @@ class ContainerDashboard:
         previous = self.previous_view_mode
         self._dispatch_view(previous)
         print(
-            f"\\n{YELLOW}{BOLD}{self.input_dialog.prompt}{RESET}{self.input_dialog.buffer}",
+            f"\n{YELLOW}{BOLD}{self.input_dialog.prompt}{RESET}{self.input_dialog.buffer}",
             end="",
             flush=True,
         )
@@ -1362,7 +1530,7 @@ class ContainerDashboard:
                 cmd for cmd in self.exec_history if self.input_dialog.buffer.lower() in cmd.lower()
             ]
             if matches:
-                print(f"\\n{CYAN}Matches: {', '.join(matches[:5])}{RESET}", end="", flush=True)
+                print(f"\n{CYAN}Matches: {', '.join(matches[:5])}{RESET}", end="", flush=True)
 
     def draw_help_view(self) -> None:
         size = get_terminal_size()
@@ -1390,6 +1558,9 @@ class ContainerDashboard:
         print("  C (Shift)    Clone the selected container")
         print("  W            Edit live CPU / memory limits (docker update)")
         print("  Shift+F      Browse volume files (on the Volumes tab)")
+        print("  Ctrl+S       Bulk start/stop every container matching the filter")
+        print("  Ctrl+<key>   Run a custom `hotkey_overlays` command from your config")
+        print("  Shift+P      Unpin the pinned logs/details pane")
         print("  O / Y        Cycle sorting and state filters")
         print("  / / C        Apply or clear the tab filter")
         print("  U / D / B    Compose up / down / build on the Compose tab")
@@ -1408,6 +1579,7 @@ class ContainerDashboard:
         print("  H            Toggle log highlighting / regex")
         print("  + / -        Increase or decrease log tail limit")
         print("  / / C        Apply or clear log filter")
+        print("  P            Pin logs (or details) under the dashboard")
         print("  O            Export logs to a local file")
         print("  G            Refresh logs now")
         print("\n" + "═" * (width - 1))
@@ -1817,7 +1989,7 @@ class ContainerDashboard:
             )
             self._activate_endpoint(entry)
 
-    def _activate_endpoint(self, endpoint: Dict[str, str]) -> None:
+    def _activate_endpoint(self, endpoint: dict[str, str]) -> None:
         host = endpoint.get("host")
         if not host:
             self.set_status("Endpoint has no host.")
@@ -1905,7 +2077,7 @@ class ContainerDashboard:
     def disable_mouse_tracking(self) -> None:
         print("\033[?1000l", end="", flush=True)
 
-    def _percentage_bar(self, percentage_str: str, width: int = 15) -> Tuple[str, bool]:
+    def _percentage_bar(self, percentage_str: str, width: int = 15) -> tuple[str, bool]:
         try:
             val = float(percentage_str.replace("%", "").strip())
             val = max(0.0, min(100.0, val))
@@ -1918,11 +2090,15 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- view dispatch
 
+    @staticmethod
+    def split_viewport_height(height: int) -> int:
+        """Content rows of a pinned pane; the pane adds ~7 rows of chrome."""
+        return max(4, height // 2 - 8)
+
     def get_viewport_height(self, height: int) -> int:
-        h = viewport_height_for(height)
         if getattr(self, "_split_screen_mode", False):
-            return max(5, (h // 2) - 1)
-        return h
+            return self.split_viewport_height(height)
+        return viewport_height_for(height)
 
     def _dispatch_view(self, view: ViewMode) -> None:
         if view == ViewMode.MAIN:
@@ -1954,20 +2130,109 @@ class ContainerDashboard:
         elif view == ViewMode.FILES:
             self.draw_files_view()
 
+    # ------------------------------------------------------------- pinned panes
+
+    def pin_current_view(self) -> None:
+        """Pin the logs/details view to the lower half of the dashboard."""
+        if self.view_mode not in (ViewMode.LOGS, ViewMode.DETAILS):
+            return
+        self.pinned_view = self.view_mode
+        self.pinned_target = self.active_container
+        self.pinned_project = self.active_project
+        if self.view_mode == ViewMode.LOGS:
+            # A pinned log pane is only useful if it keeps updating.
+            self.log_follow = True
+        self.view_mode = ViewMode.MAIN
+        self.set_status("Pinned pane to the bottom half. Shift+P to unpin.")
+
+    def unpin_view(self) -> None:
+        if self.pinned_view == ViewMode.LOGS:
+            self.stop_log_stream()
+        self.pinned_view = None
+        self.pinned_target = None
+        self.pinned_project = None
+
+    def _pinned_label(self) -> str:
+        if self.pinned_view is None:
+            return ""
+        kind = "logs" if self.pinned_view == ViewMode.LOGS else "details"
+        target = self.pinned_project or (self.pinned_target or {}).get("name", "")
+        return f"{kind} {target}".strip()
+
+    # ------------------------------------------------------------- bulk / overlays
+
+    def bulk_start_stop(self) -> None:
+        """Start or stop every container matching the current filter (Ctrl+S)."""
+        targets = list(self.containers)
+        if not targets:
+            self.set_status("No containers match the current filter.")
+            return
+        any_running = any(c.get("state") == "running" for c in targets)
+        action = "stop" if any_running else "start"
+        affected = [c for c in targets if (c.get("state") == "running") == any_running]
+        scope = f"matching '{self.container_filter}'" if self.container_filter else "visible"
+        if self.state_filter != StateFilter.ALL.value:
+            scope += f", state={self.state_filter}"
+        names = ", ".join(c["name"] for c in affected[:5])
+        if len(affected) > 5:
+            names += f", +{len(affected) - 5} more"
+        answer = self.prompt_user(
+            f"{action.title()} {len(affected)} {scope} container(s) [{names}]? (y/n): "
+        )
+        if answer.lower() not in ("y", "yes"):
+            self.set_status(f"Bulk {action} canceled.")
+            return
+        self.set_status(f"Bulk {action}: {len(affected)} container(s)...")
+        ok, msg = self.client.bulk_container_action(action, [c["id"] for c in affected])
+        if ok:
+            self.set_status(f"Bulk {action} finished for {len(affected)} container(s).")
+        else:
+            self.set_status(f"Bulk {action} failed: {msg.splitlines()[0] if msg else 'error'}")
+        self.refresh_data()
+
+    def _run_hotkey_overlay(self, key: str) -> bool:
+        """Run a user-defined `hotkey_overlays` command in the selected container."""
+        if self.current_tab not in ("containers", "compose"):
+            return False
+        command = resolve_hotkey_overlay(self.config.hotkey_overlays, key)
+        if command is None:
+            return False
+        sel = self.current_selected_container()
+        if not sel:
+            self.set_status("Select a container to run the hotkey command.")
+            return True
+        if sel.get("state") != "running":
+            self.set_status(f"Error: Container {sel['name']} is not running.")
+            return True
+        self.active_container = sel
+        self.exec_command_text = command
+        self.set_status(f"Running hotkey command: {command}...")
+        output = self.client.exec_command(sel["id"], command)
+        self.exec_output_lines = output.split("\n")
+        self.exec_scroll_index = 0
+        self.view_mode = ViewMode.EXEC
+        return True
+
     def draw_current(self) -> None:
         if self.pinned_view and self.view_mode == ViewMode.MAIN:
             self._split_screen_mode = True
             try:
+                clear_screen()
                 self.draw_main_view()
                 size = get_terminal_size()
                 print("═" * (size.width - 1))
                 orig_view_mode = self.view_mode
                 orig_active = self.active_container
+                orig_project = self.active_project
                 self.view_mode = self.pinned_view
                 self.active_container = self.pinned_target
-                self._dispatch_view(self.pinned_view)
-                self.view_mode = orig_view_mode
-                self.active_container = orig_active
+                self.active_project = self.pinned_project
+                try:
+                    self._dispatch_view(self.pinned_view)
+                finally:
+                    self.view_mode = orig_view_mode
+                    self.active_container = orig_active
+                    self.active_project = orig_project
             finally:
                 self._split_screen_mode = False
         else:
@@ -1997,7 +2262,8 @@ class ContainerDashboard:
             return
         cmd = [self.client.docker_bin, "exec", "-it", container_id] + cmd_parts
         try:
-            subprocess.run(cmd)
+            with cooked_terminal():
+                subprocess.run(cmd)
         except Exception as e:
             print(f"Error running interactive session: {e}")
             self.prompt_user("Press Enter to continue...")
@@ -2008,6 +2274,15 @@ class ContainerDashboard:
     # ------------------------------------------------------------- key handling
 
     def _handle_key_main(self, key: str) -> bool:
+        if key == "\x13" and self.current_tab in ("containers", "compose"):
+            self.bulk_start_stop()
+            return True
+        if key == "P" and self.pinned_view is not None:
+            self.unpin_view()
+            self.set_status("Unpinned pane.")
+            return True
+        if self._run_hotkey_overlay(key):
+            return True
         # Numeric tab switching.
         if key in ("1", "2", "3", "4", "5", "6"):
             self.current_tab = self.tabs[int(key) - 1]
@@ -2155,6 +2430,9 @@ class ContainerDashboard:
         if key == "h":
             self._toggle_log_highlights()
             return True
+        if key == "p":
+            self.pin_current_view()
+            return True
         if key == "o":
             self.log_follow = False
             self.start_input("Export logs to path: ", self.export_logs_to_file)
@@ -2175,6 +2453,9 @@ class ContainerDashboard:
         )
 
     def _handle_key_details(self, key: str) -> bool:
+        if key == "p":
+            self.pin_current_view()
+            return True
         return self._handle_scroll_key(
             key,
             "details_scroll_index",
@@ -2398,7 +2679,7 @@ class ContainerDashboard:
         self.set_status(f"State filter: {self.state_filter}.")
         self.refresh_data()
 
-    def _rename_container(self, sel: Dict[str, str]) -> None:
+    def _rename_container(self, sel: dict[str, str]) -> None:
         new_name = self.prompt_user(f"New name for container {sel['name']}: ")
         if not new_name:
             return
@@ -2422,6 +2703,8 @@ class ContainerDashboard:
                 return
             self.active_container = sel
             self.active_project = None
+        if self.pinned_view == ViewMode.LOGS:
+            self.unpin_view()
         for attr in ("log_filter", "log_search", "log_lines"):
             setattr(self, attr, "" if attr != "log_lines" else [])
         self.log_errors_only = False
@@ -2433,6 +2716,8 @@ class ContainerDashboard:
         sel = self.current_selected_container()
         if not sel:
             return
+        if self.pinned_view == ViewMode.DETAILS:
+            self.unpin_view()
         self.active_container = sel
         self.set_status(f"Loading details for {sel['name']}...")
         self.details_lines = self.build_details_lines(sel["id"])
@@ -2677,7 +2962,9 @@ class ContainerDashboard:
         if not patterns:
             self.set_status("No valid highlight patterns.")
             return
-        self.log_highlight_regex = re.compile("|".join(f"(?:{p.pattern})" for p in patterns))
+        self.log_highlight_regex = re.compile(
+            "|".join(f"(?:{p.pattern})" for p in patterns), re.IGNORECASE
+        )
         self.set_status(f"Highlighting {len(patterns)} pattern(s) in logs.")
 
     # ------------------------------------------------------------- main loop
@@ -2714,13 +3001,17 @@ class ContainerDashboard:
 
                 if self.need_redraw:
                     self.need_redraw = False
-                    self._dispatch_view(self.view_mode)
+                    self.draw_current()
 
                 if self.view_mode == ViewMode.MAIN and (
                     time.time() - self.last_refresh > self.refresh_interval
                 ):
                     self.request_refresh()
-                if self.view_mode != ViewMode.LOGS and self.is_log_streaming():
+                log_pinned = self.pinned_view == ViewMode.LOGS and self.view_mode in (
+                    ViewMode.MAIN,
+                    ViewMode.INPUT,
+                )
+                if self.view_mode != ViewMode.LOGS and not log_pinned and self.is_log_streaming():
                     self.stop_log_stream()
                 if RESIZE_REQUESTED:
                     RESIZE_REQUESTED = False
@@ -2760,4 +3051,5 @@ class ContainerDashboard:
             self.stop_log_stream()
             self.stop_refresh_worker()
             self.disable_mouse_tracking()
+            restore_terminal()
             print(RESET)

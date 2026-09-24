@@ -90,5 +90,35 @@ class TestStyles(unittest.TestCase):
         self.assertEqual(result, "red text")
 
 
+class TestListWindow(unittest.TestCase):
+    def test_short_list_is_not_clipped(self):
+        from docktui.screen import list_window
+
+        self.assertEqual(list_window(5, 3, 10), (0, 5))
+
+    def test_selection_stays_visible(self):
+        from docktui.screen import list_window
+
+        self.assertEqual(list_window(100, 0, 10), (0, 10))
+        self.assertEqual(list_window(100, 50, 10), (45, 55))
+        self.assertEqual(list_window(100, 99, 10), (90, 100))
+        for selected in range(100):
+            start, end = list_window(100, selected, 7)
+            self.assertTrue(start <= selected < end)
+            self.assertEqual(end - start, 7)
+
+
+class TestWrapHints(unittest.TestCase):
+    def test_wraps_only_at_separators(self):
+        from docktui.screen import wrap_hints
+
+        hints = "[S] Start/Stop | [R] Restart | [L] Logs | [C] Clone | [Q] Quit"
+        lines = wrap_hints(hints, 30)
+        self.assertEqual(" | ".join(lines), hints)
+        self.assertTrue(all(len(line) <= 30 for line in lines))
+        self.assertIn("[C] Clone", " ".join(lines))
+        self.assertEqual(wrap_hints(hints, 200), [hints])
+
+
 if __name__ == "__main__":
     unittest.main()

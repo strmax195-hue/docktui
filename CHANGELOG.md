@@ -2,21 +2,48 @@
 
 All notable changes to DockTUI are documented here.
 
-## [Unreleased]
-### Added
-- Added CodeQL Static Application Security Testing (SAST) to GitHub Actions.
-- Added a `typecheck` job to GitHub Actions to enforce `mypy`.
-- Added a `pre-commit-config.yaml` to enforce `ruff` and `mypy` locally.
+## [1.5.0] - Unreleased
 
-### Changed
-- Configured Dependabot for Python (`pip`) and GitHub Actions.
-- Upgraded the CI test runner to use `pytest --cov` for test coverage reporting.
-- Formatted entire codebase to standard guidelines using `ruff`.
-- Fixed 51 MyPy typing issues, largely around `subprocess` interactions with Docker CLI.
-- Enabled Git branch protection.
+A release focused on people who run Docker hosts: scriptable health checks, diagnostics, and fixing dashboard features that did not work as documented.
+
+### Added
+- **`docktui check`**: health check with Nagios-compatible exit codes (`0` OK, `1` WARNING, `2` CRITICAL, `3` UNKNOWN) and plugin-style output with perfdata. Flags unhealthy healthchecks, restart loops, dead containers, crashes (non-zero exit codes), SIGKILL/OOM exits, CPU/memory thresholds (`--cpu-warn`, `--mem-warn`) and missing required containers (`--require GLOB`). Supports `--json` and `--quiet`.
+- **`docktui status`** (alias `ps`): one-shot container table with state, health, CPU, memory and Compose project, or `--json` for scripts. `--filter`/`--exclude` globs match container and Compose project names.
+- **`docktui doctor`**: diagnoses the Docker CLI, daemon reachability, socket permissions (with the `usermod -aG docker` hint), endpoint (`ssh` client present, insecure `tcp://…:2375` warning), Compose plugin, config file JSON and terminal size.
+- **`docktui config init|path|show`** to create, locate and print the configuration.
+- `-c/--config PATH`, `$DOCKTUI_CONFIG` and `$XDG_CONFIG_HOME` support; the settings editor now saves back to the file the config was loaded from.
+- `--no-color` flag (same as `NO_COLOR=1`) and `-V` short version flag.
+- Dashboard lists (containers, Compose, images, volumes, networks, contexts) now scroll and keep the selection visible, with a `[rows X-Y of N]` indicator — usable on hosts with hundreds of containers.
+- Unhealthy and restarting containers are highlighted in the Containers tab; container states are coloured in the Compose tab too.
+- Log lines are coloured by severity (`ERROR`/`FATAL` red, `WARN` yellow, also `level=…` logfmt).
+- `docktui status` fits the table to the terminal width instead of wrapping.
+- README screenshots are generated from the real UI (`scripts/screenshots.py` + `scripts/demo/`), with a dark-mode logo variant and a new social preview image.
+- `poll_intervals` config block (documented previously, but it was silently ignored).
+- `py.typed` marker, `Typing :: Typed` and sysadmin classifiers; CI integration job against a real Docker daemon; CLI smoke tests; release workflow attaches the wheel and sdist to the GitHub release and checks the tag matches the package version.
 
 ### Fixed
-- **Windows Paths:** Fixed a critical functional bug where `shlex.split` dropped backslashes on Windows during interactive `docker exec` sessions.
+- **Dropped key presses on Linux/macOS**: the terminal was switched into raw mode only for 50 ms per poll using `TCSAFLUSH`, which discarded keys typed in between and echoed arrow-key escape sequences onto the screen. The terminal now stays in cbreak mode for the whole session and is restored for prompts, interactive `exec` and on exit.
+- **CPU/memory stats missing** with recent Docker releases, which print full 64-character IDs in `docker stats` while `docker ps` prints short IDs.
+- **Bulk start/stop (`Ctrl+S`)**, **custom hotkeys (`hotkey_overlays`)** and **pinned panes (`P` in Logs/Details)** were listed in the 1.4.0 notes but were not wired into the dashboard. They are now implemented and tested; bulk actions ask for confirmation and run as a single `docker stop|start` call.
+- Background exec output was not split into lines (`"\\n"` literal), and the input prompt printed a literal `\n`.
+- The STATE column in the Containers tab was misaligned when colors were enabled.
+- **Theme switching (`M`, `--theme`) and `NO_COLOR`/`--no-color` had no effect in the dashboard**: colour codes were copied at import time. They are now re-bound whenever a theme is applied.
+- **Log highlight patterns (`H`) were compiled but never rendered**, and lost their case-insensitive flag. Matches are now shown in bold magenta.
+- The key-hint footer wrapped in the middle of words on narrow terminals; it now wraps between hints, and wrong hints (`[Shift+F] Files` on the Compose tab) were corrected.
+- `__version__` reported `1.3.0` while the package was `1.4.0`; the version now has a single source (`docktui/__init__.py`).
+- A config file with `"theme": "high-contrast"` or a non-numeric value no longer resets or crashes the CLI.
+- Removed the misleading `pip install docktui` instruction (the package is not on PyPI yet) and a broken "Lint" badge.
+
+### Changed
+- **Python 3.9+ is now required** (3.8 reached end-of-life in October 2024). Packaging uses an SPDX `license` expression (setuptools ≥ 77), which avoids build failures scheduled for 2027.
+- Type hints modernised to built-in generics; `mypy`, `pytest` and `coverage` are configured in `pyproject.toml`.
+- CI matrix: Python 3.9, 3.11, 3.13 and 3.14 on Linux, macOS and Windows.
+
+### Earlier unreleased changes
+- Added CodeQL Static Application Security Testing (SAST) to GitHub Actions.
+- Added a `typecheck` job to GitHub Actions to enforce `mypy`, and a `pre-commit-config.yaml` for `ruff` and `mypy`.
+- Configured Dependabot for Python (`pip`) and GitHub Actions; `pytest --cov` coverage reporting in CI.
+- Fixed a Windows bug where `shlex.split` dropped backslashes during interactive `docker exec` sessions.
 
 ## [1.4.0] - 2026-06-15
 

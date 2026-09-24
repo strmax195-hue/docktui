@@ -18,5 +18,5 @@ repos:
     rev: v1.10.0
     hooks:
       - id: mypy
-        additional_dependencies: [ types-requests ]
         args: [ --ignore-missing-imports ]
+        files: ^docktui/
