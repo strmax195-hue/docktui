@@ -230,8 +230,14 @@ def _truncate(text: str, width: int) -> str:
     return text if len(text) <= width else text[: max(1, width - 1)] + "…"
 
 
-def format_table(rows: list[dict[str, Any]], color: bool = False) -> str:
-    """Render rows as a compact, `docker ps`-like table."""
+def format_table(
+    rows: list[dict[str, Any]], color: bool = False, width: Optional[int] = None
+) -> str:
+    """Render rows as a compact, `docker ps`-like table.
+
+    With `width` (the terminal width), the trailing STATUS column is shortened
+    so rows never wrap.
+    """
     if not rows:
         return "No containers found."
     headers: tuple[str, ...] = (
@@ -259,6 +265,11 @@ def format_table(rows: list[dict[str, Any]], color: bool = False) -> str:
             )
         )
     widths = [max(len(h), *(len(row[i]) for row in table)) for i, h in enumerate(headers)]
+    if width:
+        room = width - (sum(widths[:-1]) + 2 * (len(headers) - 1))
+        status_w = max(len(headers[-1]), room)
+        table = [row[:-1] + (_truncate(row[-1], status_w),) for row in table]
+        widths[-1] = min(widths[-1], status_w)
 
     def paint(cell: str, i: int, raw: tuple[str, ...]) -> str:
         padded = cell.ljust(widths[i]) if i < len(headers) - 1 else cell

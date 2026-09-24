@@ -390,5 +390,41 @@ class TestAdminWorkflows(unittest.TestCase):
         self.assertIsNone(dashboard.pinned_view)
 
 
+class TestLogColoringAndThemes(unittest.TestCase):
+    def tearDown(self):
+        from docktui import tui
+
+        tui.apply_theme_colors("dark")
+
+    def test_severity_colors_and_highlights(self):
+        import re
+
+        from docktui import tui
+
+        tui.apply_theme_colors("dark")
+        self.assertTrue(tui.colorize_log_line("12:00 ERROR boom").startswith(tui.RED))
+        self.assertTrue(tui.colorize_log_line("level=warn msg=slow").startswith(tui.YELLOW))
+        self.assertEqual(tui.colorize_log_line("all good"), "all good")
+        highlighted = tui.colorize_log_line("user login ok", re.compile("login", re.I))
+        self.assertIn(f"{tui.MAGENTA}{tui.BOLD}login", highlighted)
+
+    def test_theme_switch_reaches_dashboard_module(self):
+        from docktui import screen, tui
+
+        tui.apply_theme_colors("light")
+        self.assertEqual(tui.CYAN, "\033[34m")
+        self.assertEqual(screen.CYAN, "\033[34m")
+        with patch.dict("os.environ", {"NO_COLOR": "1"}):
+            tui.apply_theme_colors("dark")
+        self.assertEqual(tui.RED, "")
+        self.assertEqual(tui.colorize_log_line("ERROR x"), "ERROR x")
+
+    def test_highlight_toggle_is_case_insensitive(self):
+        dashboard = ContainerDashboard()
+        dashboard.config.log_highlights = [{"label": "err", "pattern": "error"}]
+        dashboard._toggle_log_highlights()
+        self.assertIsNotNone(dashboard.log_highlight_regex.search("ERROR"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,8 @@ import time
 from collections.abc import Iterator
 from typing import Any, Callable, Optional
 
+from . import screen as _screen_module
+from . import styles as _styles
 from .config import Config
 from .constants import (
     AVAILABLE_TABS,
@@ -42,17 +44,46 @@ from .screen import (
     slice_viewport,
     truncate,
     viewport_height_for,
+    wrap_hints,
 )
 from .styles import (
     BOLD,
     CYAN,
     GREEN,
+    MAGENTA,
     RED,
     RESET,
     WHITE_ON_BLUE,
     YELLOW,
-    apply_theme_colors,
 )
+
+_THEMED_NAMES = (
+    "RESET",
+    "BOLD",
+    "CYAN",
+    "GREEN",
+    "RED",
+    "YELLOW",
+    "WHITE_ON_BLUE",
+    "BG_DARK_GRAY",
+    "MAGENTA",
+)
+
+
+def apply_theme_colors(theme_name: Optional[str] = None) -> str:
+    """Apply a theme and re-bind the colour names imported by this module and `screen`.
+
+    `from .styles import RED` copies the value at import time, so without this
+    re-binding theme switches (`M`, `--theme`) and `NO_COLOR` never reached the
+    dashboard.
+    """
+    name = _styles.apply_theme_colors(theme_name)
+    for namespace in (globals(), vars(_screen_module)):
+        for attr in _THEMED_NAMES:
+            if attr in namespace:
+                namespace[attr] = getattr(_styles, attr)
+    return name
+
 
 # ---------------------------------------------------------------------------
 # Cross-platform keyboard input
@@ -238,6 +269,28 @@ def _log_matches_filter(line: str, needle: str) -> bool:
 def _log_is_error_line(line: str) -> bool:
     lowered = line.lower()
     return any(keyword in lowered for keyword in ERROR_KEYWORDS)
+
+
+_LOG_ERROR_RE = re.compile(
+    r"\b(?:ERROR|FATAL|CRITICAL|PANIC|EMERG|ALERT)\b|level=(?:error|fatal|crit)|\bTraceback\b"
+)
+_LOG_WARN_RE = re.compile(r"\b(?:WARN|WARNING)\b|level=warn")
+
+
+def colorize_log_line(line: str, highlight: Optional[re.Pattern] = None) -> str:
+    """Colour a log line by severity and wrap `highlight` matches in bold magenta."""
+    if _LOG_ERROR_RE.search(line):
+        base = RED
+    elif _LOG_WARN_RE.search(line):
+        base = YELLOW
+    else:
+        base = ""
+    text = line
+    if highlight is not None:
+        text = highlight.sub(lambda m: f"{MAGENTA}{BOLD}{m.group(0)}{RESET}{base}", text)
+    if base or text != line:
+        return f"{base}{text}{RESET}"
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -1015,6 +1068,20 @@ class ContainerDashboard:
         self._list_clipped = (start, end, total) if (start, end) != (0, total) else None
         return start, end
 
+    @staticmethod
+    def _state_cell(state: str, row_style: str = "") -> str:
+        """A 10-wide container state cell, coloured unless the row is highlighted."""
+        padded = f"{state:<10}"
+        if row_style:
+            return padded
+        if state == "running":
+            color = GREEN
+        elif state in ("exited", "dead"):
+            color = RED
+        else:
+            color = YELLOW
+        return f"{color}{padded}{RESET}"
+
     def _draw_containers_tab(self, width: int) -> None:
         if not self.containers:
             if self.container_filter:
@@ -1038,12 +1105,7 @@ class ContainerDashboard:
             style = WHITE_ON_BLUE if idx == self.selected_index else ""
             state = c["state"]
             padded_state = f"{state:<10}"
-            if state == "running":
-                state_formatted = f"{GREEN}{padded_state}{RESET}"
-            elif state in ("exited", "dead"):
-                state_formatted = f"{RED}{padded_state}{RESET}"
-            else:
-                state_formatted = f"{YELLOW}{padded_state}{RESET}"
+            state_formatted = self._state_cell(state)
             status_cell = truncate(c["status"], status_w)
             if "(unhealthy)" in c["status"] or state == "restarting":
                 status_cell = f"{RED}{status_cell}{RESET}"
@@ -1107,7 +1169,8 @@ class ContainerDashboard:
                 print(
                     f"{style}{truncate(marker + service, service_w)} "
                     f"{truncate(container.get('name', ''), name_w)} "
-                    f"{state:<10} {truncate(container.get('image', ''), image_w)}{RESET}"
+                    f"{self._state_cell(state, style)} "
+                    f"{truncate(container.get('image', ''), image_w)}{RESET}"
                 )
 
     def _draw_images_tab(self, width: int) -> None:
@@ -1218,41 +1281,32 @@ class ContainerDashboard:
             )
         print("─" * (width - 1))
 
-    def _draw_main_footer(self) -> None:
+    def _main_footer_hints(self) -> str:
         if self.current_tab == "compose":
             row = self.compose_rows[self.selected_compose_index] if self.compose_rows else None
             if row and row.get("type") == "project":
-                print(
-                    f"{CYAN}[U] Up | [D] Down | [B] Build | [R] Restart | [L] Project Logs | [Tab] Switch | [?] Help | [Q] Quit{RESET}"
-                )
+                return "[U] Up | [D] Down | [B] Build | [R] Restart | [L] Project Logs | [Tab] Switch | [?] Help | [Q] Quit"
             else:
-                print(
-                    f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [O] Sort | [Y] State | [Shift+F] Files | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-                )
+                return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "containers":
-            print(
-                f"{CYAN}[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [C] Clone | [O] Sort | [Y] State | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [Shift+C] Clone | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "images":
-            print(
-                f"{CYAN}[D] Delete | [F] Search & Pull | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[D] Delete | [F] Search & Pull | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "volumes":
-            print(
-                f"{CYAN}[D] Delete | [F] Browse Files | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[D] Delete | [Shift+F] Browse Files | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
         elif self.current_tab == "networks":
-            print(
-                f"{CYAN}[D] Delete | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
+            return (
+                "[D] Delete | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
             )
         elif self.current_tab == "contexts":
-            print(
-                f"{CYAN}[U] Use | [N] New Endpoint | [Shift+S] Settings | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[U] Use | [N] New Endpoint | [Shift+S] Settings | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit"
         else:
-            print(
-                f"{CYAN}[Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit{RESET}"
-            )
+            return "[Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
+
+    def _draw_main_footer(self) -> None:
+        width = get_terminal_size().width
+        for line in wrap_hints(self._main_footer_hints(), width - 1):
+            print(f"{CYAN}{line}{RESET}")
 
     # ------------------------------------------------------------- empty state
 
@@ -1345,7 +1399,7 @@ class ContainerDashboard:
 
         visible, start, end = slice_viewport(self.log_lines, self.log_scroll_index, viewport_height)
         for line in visible:
-            print(line[: width - 1])
+            print(colorize_log_line(line[: width - 1], self.log_highlight_regex))
         pad_to_viewport(len(visible), viewport_height)
         if getattr(self, "_split_screen_mode", False):
             return  # pinned pane: the dashboard footer already shows the keys
@@ -2908,7 +2962,9 @@ class ContainerDashboard:
         if not patterns:
             self.set_status("No valid highlight patterns.")
             return
-        self.log_highlight_regex = re.compile("|".join(f"(?:{p.pattern})" for p in patterns))
+        self.log_highlight_regex = re.compile(
+            "|".join(f"(?:{p.pattern})" for p in patterns), re.IGNORECASE
+        )
         self.set_status(f"Highlighting {len(patterns)} pattern(s) in logs.")
 
     # ------------------------------------------------------------- main loop

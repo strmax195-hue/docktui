@@ -80,6 +80,22 @@ def list_window(total: int, selected: int, rows: int) -> tuple[int, int]:
     return start, start + rows
 
 
+def wrap_hints(text: str, width: int, sep: str = " | ") -> list[str]:
+    """Wrap a ``"[K] Action | [K] Action"`` hint bar at separators, never mid-word."""
+    lines: list[str] = []
+    current = ""
+    for item in text.split(sep):
+        candidate = f"{current}{sep}{item}" if current else item
+        if current and len(candidate) > width:
+            lines.append(current)
+            current = item
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
 def pad_to_viewport(visible_count: int, viewport_height: int) -> None:
     """Print empty lines so the viewport height stays constant."""
     for _ in range(max(0, viewport_height - visible_count)):

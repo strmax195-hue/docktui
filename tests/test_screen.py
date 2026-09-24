@@ -108,5 +108,17 @@ class TestListWindow(unittest.TestCase):
             self.assertEqual(end - start, 7)
 
 
+class TestWrapHints(unittest.TestCase):
+    def test_wraps_only_at_separators(self):
+        from docktui.screen import wrap_hints
+
+        hints = "[S] Start/Stop | [R] Restart | [L] Logs | [C] Clone | [Q] Quit"
+        lines = wrap_hints(hints, 30)
+        self.assertEqual(" | ".join(lines), hints)
+        self.assertTrue(all(len(line) <= 30 for line in lines))
+        self.assertIn("[C] Clone", " ".join(lines))
+        self.assertEqual(wrap_hints(hints, 200), [hints])
+
+
 if __name__ == "__main__":
     unittest.main()

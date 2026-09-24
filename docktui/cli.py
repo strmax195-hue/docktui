@@ -12,6 +12,7 @@ sub-commands are non-interactive and script-friendly:
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -236,7 +237,8 @@ def cmd_status(args: argparse.Namespace, config: Config) -> int:
     if args.json:
         print(json.dumps(rows, indent=2))
     else:
-        print(format_table(rows, color=_use_color()))
+        width = shutil.get_terminal_size((0, 0)).columns if sys.stdout.isatty() else 0
+        print(format_table(rows, color=_use_color(), width=width or None))
     return 0
 
 

@@ -123,6 +123,13 @@ class TestFormatTable(unittest.TestCase):
         self.assertNotIn("\033[", text)
         self.assertIn("\033[", report.format_table(rows, color=True))
 
+    def test_table_fits_terminal_width(self):
+        long_status = "Up 3 hours (healthy) " + "x" * 80
+        rows = report.build_rows([_c("web", status=long_status)])
+        text = report.format_table(rows, width=90)
+        self.assertTrue(all(len(line) <= 90 for line in text.splitlines()))
+        self.assertIn("…", text)
+
 
 if __name__ == "__main__":
     unittest.main()
