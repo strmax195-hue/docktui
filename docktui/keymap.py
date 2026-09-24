@@ -6,7 +6,7 @@ key-handlers a structured, testable way to declare their key bindings.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Optional
 
 KeyHandler = Callable[[str], None]
 
@@ -25,7 +25,7 @@ class KeyBinding:
 class Keymap:
     """Registry of (view, key) -> handler mappings."""
 
-    bindings: List[KeyBinding] = field(default_factory=list)
+    bindings: list[KeyBinding] = field(default_factory=list)
 
     def register(self, view: str, key: str, handler: KeyHandler, description: str = "") -> None:
         self.bindings.append(
@@ -45,9 +45,9 @@ class Keymap:
                     return True
         return False
 
-    def descriptions_for_view(self, view: str) -> List[Tuple[str, str]]:
+    def descriptions_for_view(self, view: str) -> list[tuple[str, str]]:
         """Return [(key, description), ...] for help screens and footers."""
-        seen: Dict[str, str] = {}
+        seen: dict[str, str] = {}
         for binding in self.bindings:
             if binding.view in (view, "*") and binding.description:
                 if binding.key not in seen or binding.view != "*":
@@ -60,3 +60,34 @@ def _key_matches(spec: str, key: str) -> bool:
     if spec == key:
         return True
     return key in [alias.strip() for alias in spec.split("|") if alias.strip()]
+
+
+#: Control keys that DockTUI or the terminal already use and cannot be overlaid:
+#: Ctrl+C (SIGINT), Ctrl+H (backspace), Ctrl+I (Tab), Ctrl+J/M (Enter),
+#: Ctrl+S (bulk start/stop), Ctrl+Z (suspend), Ctrl+\\ (SIGQUIT).
+RESERVED_CTRL_KEYS = frozenset("chijmsz\\")
+
+
+def parse_hotkey(spec: str) -> str:
+    """Translate a config hotkey like ``"ctrl+l"`` into the key string the TUI sees.
+
+    Returns ``""`` for specs that are unsupported or reserved.
+    """
+    text = spec.strip().lower().replace(" ", "")
+    for prefix in ("ctrl+", "ctrl-", "c-", "^"):
+        if text.startswith(prefix):
+            letter = text[len(prefix) :]
+            if len(letter) == 1 and "a" <= letter <= "z" and letter not in RESERVED_CTRL_KEYS:
+                return chr(ord(letter) - ord("a") + 1)
+            return ""
+    return ""
+
+
+def resolve_hotkey_overlay(overlays: dict[str, str], key: str) -> Optional[str]:
+    """Return the command bound to `key` in the user's ``hotkey_overlays``, if any."""
+    if not key or len(key) != 1 or ord(key) >= 32:
+        return None
+    for spec, command in (overlays or {}).items():
+        if command and parse_hotkey(spec) == key:
+            return command
+    return None

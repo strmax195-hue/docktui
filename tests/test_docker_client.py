@@ -607,5 +607,35 @@ class TestDockerClient(unittest.TestCase):
         self.assertNotIn("com.docker.compose", snippet)
 
 
+class TestDockerClientAdminHelpers(unittest.TestCase):
+    def setUp(self):
+        self.client = DockerClient()
+        self.client.docker_bin = "docker"
+
+    @patch("subprocess.run")
+    def test_stats_keys_are_normalized_to_short_ids(self, mock_run):
+        full_id = "893bb5ca5b20740d925b2b5f5591b49d91f01a0ee111651b5d781e0e0e93ab62"
+        mock_run.return_value = MagicMock(
+            stdout=f"{full_id}|0.50%|1MiB / 1GiB|0.10%|1kB / 0B\n", returncode=0
+        )
+        stats = self.client.get_container_stats()
+        self.assertIn("893bb5ca5b20", stats)
+        self.assertEqual(stats["893bb5ca5b20"]["cpu"], "0.50%")
+
+    @patch("subprocess.run")
+    def test_bulk_container_action_runs_one_command(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="a\nb\n", stderr="")
+        ok, _ = self.client.bulk_container_action("stop", ["a", "b"])
+        self.assertTrue(ok)
+        args, kwargs = mock_run.call_args
+        self.assertEqual(args[0], ["docker", "stop", "a", "b"])
+        self.assertGreaterEqual(kwargs["timeout"], 60.0)
+
+    def test_bulk_container_action_rejects_unknown_action(self):
+        ok, msg = self.client.bulk_container_action("rm", ["a"])
+        self.assertFalse(ok)
+        self.assertIn("Unsupported", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

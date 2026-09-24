@@ -6,7 +6,7 @@ for any long-running `docker` invocation that produces output incrementally.
 
 import subprocess
 import threading
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 
 class LineStreamer:
@@ -19,7 +19,7 @@ class LineStreamer:
 
     def __init__(
         self,
-        cmd: List[str],
+        cmd: list[str],
         on_line: Optional[Callable[[str], None]] = None,
         on_stop: Optional[Callable[[], None]] = None,
         text: bool = True,
@@ -29,13 +29,13 @@ class LineStreamer:
         self.on_stop = on_stop
         self.text = text
         self._process: Optional[subprocess.Popen] = None
-        self._threads: List[threading.Thread] = []
+        self._threads: list[threading.Thread] = []
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
-        self._lines: List[str] = []
+        self._lines: list[str] = []
 
     @property
-    def lines(self) -> List[str]:
+    def lines(self) -> list[str]:
         with self._lock:
             return list(self._lines)
 

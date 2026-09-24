@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -97,6 +98,53 @@ class TestConfig(unittest.TestCase):
         self.assertNotIn("_CANDIDATE_PATHS", data)
         self.assertIn("refresh_interval", data)
         self.assertIn("endpoints", data)
+
+
+class TestConfigPaths(unittest.TestCase):
+    def test_env_var_and_xdg_take_precedence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"DOCKTUI_CONFIG": str(Path(tmp) / "custom.json"), "XDG_CONFIG_HOME": tmp}
+            with patch.dict(os.environ, env):
+                paths = Config.candidate_paths()
+            self.assertEqual(paths[0], Path(tmp) / "custom.json")
+            self.assertEqual(paths[1], Path(tmp) / "docktui" / "config.json")
+
+    def test_save_writes_back_to_loaded_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "legacy.json"
+            target.write_text(json.dumps({"theme": "light"}), encoding="utf-8")
+            config = Config.load(target)
+            config.log_tail_limit = 77
+            self.assertEqual(config.save(), target)
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["log_tail_limit"], 77)
+            self.assertNotIn("_path", json.loads(target.read_text(encoding="utf-8")))
+
+
+class TestConfigCoercion(unittest.TestCase):
+    def test_bad_numbers_fall_back_to_defaults(self):
+        config = Config.from_dict({"refresh_interval": "fast", "log_tail_limit": "120"})
+        config.validate()
+        self.assertEqual(config.refresh_interval, 2.0)
+        self.assertEqual(config.log_tail_limit, 120)
+
+    def test_high_contrast_spelling_is_accepted(self):
+        self.assertEqual(Config.from_dict({"theme": "high-contrast"}).theme, "high_contrast")
+
+    def test_poll_intervals_block(self):
+        config = Config.from_dict(
+            {"poll_intervals": {"containers": 3, "images": 15}, "refresh_interval_volumes": 20}
+        )
+        self.assertEqual(config.refresh_interval, 3.0)
+        self.assertEqual(config.refresh_interval_images, 15.0)
+        self.assertEqual(config.refresh_interval_volumes, 20.0)
+
+    def test_validate_file_reports_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "c.json"
+            target.write_text("[1, 2]", encoding="utf-8")
+            self.assertIn("object", Config.validate_file(target))
+            target.write_text("{}", encoding="utf-8")
+            self.assertIsNone(Config.validate_file(target))
 
 
 if __name__ == "__main__":
