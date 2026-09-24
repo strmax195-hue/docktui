@@ -15,11 +15,31 @@ Have an idea to make DockTUI better?
 2. Discuss feasibility and design with the maintainers.
 
 ### Development Process
-1. Fork the repository.
-2. Create a descriptive branch: `git checkout -b feature/interactive-logs`.
-3. Implement your changes. We aim for zero external dependencies, so please avoid adding third-party libraries unless absolutely necessary.
-4. Verify your changes work by running the TUI locally.
-5. Submit a pull request.
+1. Fork the repository and create a descriptive branch: `git checkout -b feature/interactive-logs`.
+2. Set up a development environment:
+
+   ```bash
+   python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+   pip install -e ".[dev]"
+   pre-commit install   # optional, runs ruff + mypy before each commit
+   ```
+
+3. Implement your change. DockTUI has **zero runtime dependencies** — please keep it that way (dev-only tools are fine).
+4. Run the same checks as CI:
+
+   ```bash
+   pytest                                  # no Docker daemon needed; subprocess calls are mocked
+   ruff check . && ruff format --check .
+   mypy
+   ```
+
+5. Try it for real: `docktui doctor`, `docktui`, and `docktui check` against your local Docker.
+6. Add a line to the `Unreleased` section of `CHANGELOG.md` and open a pull request.
+
+### Where things live
+- Non-interactive commands (`status`, `check`) are pure functions in `docktui/report.py` — the easiest place to start contributing, and fully unit-testable.
+- Diagnostics live in `docktui/doctor.py`; every check returns a `CheckResult`.
+- The dashboard is `docktui/tui.py` (one `draw_*` method and one `_handle_key_*` method per view).
 
 ## Code Guidelines
 - Write clean, PEP 8 compliant Python code.

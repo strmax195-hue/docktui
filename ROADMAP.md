@@ -44,10 +44,24 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - **Configurable poll interval per resource type**: slower refresh for volumes/networks, faster for containers.
 - **Plugin-style hotkey overlays**: users can register custom hotkeys in the config file that run shell commands or shell scripts in the active container.
 
-## Roadmap Complete (v1.4.0)
+## Delivered in v1.5.0 — ops toolkit
 
-With the release of version 1.4.0, DockTUI has achieved its primary roadmap goals for a comprehensive local Docker management experience. Future updates will focus on bug fixes, performance, and keeping up with upstream Docker changes.
+- `docktui check`: Nagios/Icinga/cron health check with exit codes, JSON output, thresholds and required containers.
+- `docktui status`: one-shot snapshot with health and resources, JSON for scripts.
+- `docktui doctor`: environment diagnostics with actionable fixes.
+- `docktui config init|path|show`, `--config`, `$DOCKTUI_CONFIG`, XDG support.
+- Scrollable dashboard lists for large hosts; reliable keyboard input on Unix.
+- Bulk start/stop, custom hotkeys and pinned panes wired up for real.
+
+## Next (ideas — feedback welcome)
+
+- `docktui check --hosts prod,stage`: check several endpoints in one run.
+- Prometheus text-format output for `status` (node_exporter textfile collector).
+- Container events feed (`docker events`) in the dashboard: OOM kills, restarts, health changes.
+- Show healthcheck log (last probe output) in the Details view.
+- Log view: `--since` time windows and saving highlight presets per container.
+- Publish to PyPI and Homebrew for one-command installs.
 
 ## Feedback wanted
 
-Open an issue if a Docker workflow feels repetitive enough that DockTUI should make it one keypress.
+Open an issue if a Docker workflow feels repetitive enough that DockTUI should make it one keypress — or one command in a cron job.
