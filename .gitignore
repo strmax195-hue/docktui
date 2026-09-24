@@ -29,7 +29,10 @@ MANIFEST
 .nox/
 .coverage
 .htmlcov
+htmlcov/
+coverage.xml
 .ruff_cache/
+.mypy_cache/
 
 # DockTUI runtime artifacts
 logs.txt

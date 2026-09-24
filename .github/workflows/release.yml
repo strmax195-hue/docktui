@@ -30,8 +30,35 @@ jobs:
       - name: Check distributions
         run: python -m twine check dist/*
 
+      - name: Verify tag matches package version
+        if: github.event_name == 'release'
+        run: |
+          version=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"(.+?)\"', pathlib.Path('docktui/__init__.py').read_text()).group(1))")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "package=$version tag=$tag"
+          test "$version" = "$tag"
+
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v7
         with:
           name: python-package-distributions
           path: dist/
+
+  attach:
+    name: Attach wheel to GitHub release
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"

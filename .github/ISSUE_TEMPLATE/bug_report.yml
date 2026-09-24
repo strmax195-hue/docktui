@@ -45,6 +45,14 @@ body:
     validations:
       required: false
   - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `docktui doctor`
+      description: Run `docktui doctor` and paste the result. It covers Docker, permissions, config and terminal.
+      render: text
+    validations:
+      required: false
+  - type: textarea
     id: logs
     attributes:
       label: Terminal output
