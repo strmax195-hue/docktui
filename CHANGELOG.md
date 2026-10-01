@@ -7,6 +7,7 @@ All notable changes to DockTUI are documented here.
 A release focused on people who run Docker hosts: scriptable health checks, diagnostics, and fixing dashboard features that did not work as documented.
 
 ### Added
+- Latest healthcheck probe in Details and an optional bounded Docker events feed (E), with connection status, reconnect cursor and replay suppression.
 - Separate terminal, log-formatting and view modules, with Unix PTY coverage for quit, interruption, resize and terminal restoration. Dashboard APIs remain available.
 - Background job queue with UI-thread result delivery, duplicate-action prevention, cancellation with Esc, frozen connection environments, and stable resource selection across refreshes. Slow collection, exec, Compose, registry search, files, details and cleanup no longer block navigation.
 - **`docktui check`**: health check with Nagios-compatible exit codes (`0` OK, `1` WARNING, `2` CRITICAL, `3` UNKNOWN) and plugin-style output with perfdata. Flags unhealthy healthchecks, restart loops, dead containers, crashes (non-zero exit codes), SIGKILL/OOM exits, CPU/memory thresholds (`--cpu-warn`, `--mem-warn`) and missing required containers (`--require GLOB`). Supports `--json` and `--quiet`.

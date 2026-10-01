@@ -952,7 +952,15 @@ class DockerClient:
         cpus = round(nano_cpus / 1e9, 3) if nano_cpus else None
         memory_mb = round(memory_bytes / (1024 * 1024), 1) if memory_bytes else None
 
+        health = state.get("Health") or {}
+        probes = health.get("Log") or []
+        probe = probes[-1] if probes else {}
+
         return {
+            "health": str(health.get("Status") or "(none)"),
+            "health_time": str(probe.get("End") or probe.get("Start") or "(none)"),
+            "health_exit_code": str(probe.get("ExitCode", "(none)")),
+            "health_output": str(probe.get("Output") or "(none)")[:4096],
             "id": (data.get("Id") or "")[:12],
             "name": (data.get("Name") or "").lstrip("/"),
             "image": config.get("Image", ""),
@@ -1144,3 +1152,11 @@ class DockerClient:
                 lines.append(f'      - "{k}={v}"')
 
         return "\n".join(lines)
+
+    def events_command(self, container_id: str, since: Optional[str] = None) -> list[str]:
+        command = [str(self.docker_bin), "events", "--format", "{{json .}}", "--filter", "type=container", "--filter", f"container={container_id}"]
+        for action in ("die", "restart", "oom", "health_status", "destroy"):
+            command.extend(["--filter", f"event={action}"])
+        if since:
+            command.extend(["--since", since])
+        return command

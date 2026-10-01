@@ -408,3 +408,11 @@ use safe defaults. Unknown active endpoints fail rather than selecting a
 different Docker host. CI requires 50% combined statement/branch coverage and
 35% branch coverage; the observed pre-refactor combined coverage was 52%
 (approximately 40% branches), with coverage JSON retained as an artifact.
+
+### Container diagnosis
+
+Details (`V`) shows the latest healthcheck probe time, exit code and output
+(up to 4096 characters). Press `E` in Details to toggle a bounded feed of
+container die/restart/OOM/health/destroy events. Disconnects are displayed; the
+feed reconnects using its last nanosecond cursor and suppresses replayed events.
+Events use the selected connection and stop on endpoint switches or app exit.

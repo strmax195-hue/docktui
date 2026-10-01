@@ -29,6 +29,7 @@ from .constants import (
 from .dialogs import DialogResult, apply_dialog_key
 from .docker_client import DockerClient
 from .enums import ComposeAction, StateFilter, ThemeName, ViewMode
+from .events import EventFeed
 from .jobs import JobRunner
 from .keymap import Keymap, resolve_hotkey_overlay
 from .log_format import _log_is_error_line, _log_matches_filter
@@ -240,6 +241,12 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.jobs = JobRunner()
         self._ui_lines: deque = deque(maxlen=max(1, self.config.log_max))
         self._ui_events: deque = deque(maxlen=100)
+        self.event_feed = EventFeed()
+        self.event_streamer: Optional[LineStreamer] = None
+        self.event_target: Optional[str] = None
+        self.events_enabled = False
+        self._event_epoch = 0
+        self._event_retry_at = 0.0
         self._log_generation = 0
         self._viewport_h = 0
 
@@ -658,6 +665,9 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             f"Status: {details.get('status', '')}",
             f"Running: {details.get('running', '')}",
             f"Created: {details.get('created', '')}",
+            f"Health: {details.get('health', '(none)')}",
+            f"Last probe: {details.get('health_time', '(none)')} exit={details.get('health_exit_code', '(none)')}",
+            f"Probe output: {details.get('health_output', '(none)')}",
             f"Restart policy: {details.get('restart_policy', '') or '(none)'}",
             f"CPU limit: {details.get('cpus') or '(unlimited)'}",
             f"Memory limit: {(details.get('memory_mb') or '(unlimited)') + (' MB' if details.get('memory_mb') else '')}",
@@ -749,6 +759,8 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             if generation == self.client.connection_generation:
                 callback()
         self.jobs.drain(self.client.connection_generation)
+        if self.events_enabled and self.event_streamer is None and time.monotonic() >= self._event_retry_at:
+            self._start_events()
 
     def _snapshot_request(self) -> tuple[str, str, str, str]:
         return (
@@ -1275,6 +1287,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             return
         self.jobs.cancel_all()
         self.refresh_in_progress = False
+        self.stop_events()
         self.stop_log_stream()
         if self.pull_streamer is not None:
             self.pull_streamer.stop()
@@ -1759,6 +1772,14 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         )
 
     def _handle_key_details(self, key: str) -> bool:
+        if key.lower() == "e":
+            if self.events_enabled:
+                self.stop_events()
+            else:
+                self.events_enabled = True
+                self._start_events()
+            self.need_redraw = True
+            return True
         if key == "p":
             self.pin_current_view()
             return True
@@ -2013,6 +2034,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             return
         if self.pinned_view == ViewMode.DETAILS:
             self.unpin_view()
+        self.stop_events()
         self.active_container = sel
         self.set_status(f"Loading details for {sel['name']}...")
         self.details_lines = ["Loading…"]
@@ -2299,6 +2321,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         finally:
             self._running = False
             self.jobs.shutdown()
+            self.stop_events()
             self.stop_log_stream()
             if self.pull_streamer is not None:
                 self.pull_streamer.stop()
@@ -2306,3 +2329,46 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.disable_mouse_tracking()
             restore_terminal()
             print(RESET)
+
+    def _start_events(self) -> None:
+        if not self.active_container or not self.client.docker_bin:
+            self.events_enabled = False
+            return
+        target = self.active_container["id"]
+        if self.event_target != target:
+            self.event_feed = EventFeed()
+        self.event_target = target
+        epoch = self._event_epoch
+        generation = self.client.connection_generation
+        client = self.client.snapshot(self.current_context)
+
+        def receive(line: str) -> None:
+            def apply() -> None:
+                if epoch == self._event_epoch and self.event_feed.append(line):
+                    self.need_redraw = True
+            self._post_ui(apply, generation, line=True)
+
+        def complete(result: StreamResult) -> None:
+            def apply() -> None:
+                if epoch == self._event_epoch:
+                    self.event_streamer = None
+                    self.event_feed.disconnect(result.returncode)
+                    self._event_retry_at = time.monotonic() + 2
+                    self.need_redraw = True
+            self._post_ui(apply, generation)
+
+        self.event_feed.status = "connecting"
+        self.event_streamer = LineStreamer(
+            client.events_command(target, self.event_feed.since), receive,
+            env=client.command_env(), on_complete=complete,
+        )
+        self.event_streamer.start()
+
+    def stop_events(self) -> None:
+        self.events_enabled = False
+        self._event_epoch += 1
+        if self.event_streamer is not None:
+            self.event_streamer.stop()
+            self.event_streamer = None
+        self.event_target = None
+        self.event_feed = EventFeed()

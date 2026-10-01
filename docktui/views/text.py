@@ -48,8 +48,8 @@ class TextViews:
 
     def draw_details_view(self: Any) -> None:
         self._draw_scrollable_text_view(
-            "CONTAINER DETAILS",
-            self.details_lines,
+            "CONTAINER DETAILS [E] events",
+            self.details_lines + (["", *self.event_feed.lines()] if self.events_enabled else []),
             "details_scroll_index",
             "V",
         )
