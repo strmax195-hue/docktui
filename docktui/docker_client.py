@@ -4,6 +4,7 @@ import os
 import shlex
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 
@@ -188,6 +189,8 @@ class DockerClient:
         self,
         cmd: list[str],
         action: str = "running command",
+        timeout: Optional[float] = None,
+        cwd: Optional[str] = None,
     ) -> tuple[bool, str]:
         """Run a `docker` command returning ``(success, text)``.
 
@@ -198,6 +201,11 @@ class DockerClient:
         """
         if not self.is_docker_installed():
             return False, "Docker not installed."
+        options: dict = {}
+        if timeout is not None:
+            options["timeout"] = timeout
+        if cwd is not None:
+            options["cwd"] = cwd
         try:
             res = self._run(
                 cmd,
@@ -206,9 +214,10 @@ class DockerClient:
                 check=False,
                 encoding="utf-8",
                 errors="replace",
+                **options,
             )
         except subprocess.TimeoutExpired:
-            return False, _format_timeout_message(self.timeout, action)
+            return False, _format_timeout_message(timeout or self.timeout, action)
         except Exception as e:
             return False, f"Error {action}: {e}"
         if res.returncode != 0:
@@ -967,36 +976,35 @@ class DockerClient:
         out = self._capture(cmd, action="executing command")
         return out or "(Command executed with no output)"
 
-    def run_compose_cmd(self, project_name: str, config_file: str, action: str) -> tuple[bool, str]:
+    def run_compose_cmd(
+        self, project_name: str, config_file: str, action: str,
+        working_dir: Optional[str] = None,
+    ) -> tuple[bool, str]:
         if not self.is_docker_installed():
             return False, "Docker not installed."
-
-        cmd = [str(self.docker_bin)]
-        if config_file:
-            files = [f.strip() for f in config_file.split(",") if f.strip()]
-            for f in files:
-                cmd += ["-f", f]
-        else:
-            cmd += ["-p", project_name]
-
-        cmd += ["compose"]
-        if action == "up":
-            cmd += ["up", "-d"]
-        elif action == "up-build":
-            cmd += ["up", "-d", "--build"]
-        elif action == "down":
-            cmd += ["down"]
-        elif action == "build":
-            cmd += ["build"]
-        elif action == "restart":
-            cmd += ["restart"]
-        else:
+        actions = {
+            "up": ["up", "-d"],
+            "up-build": ["up", "-d", "--build"],
+            "down": ["down"],
+            "build": ["build"],
+            "restart": ["restart"],
+        }
+        if action not in actions:
             return False, f"Unknown compose action: {action}"
-
-        success, msg = self._run_capture(cmd, action=f"running compose {action}")
-        if not success:
-            return False, msg
-        return True, msg.strip() or f"Compose {action} succeeded."
+        if working_dir and not Path(working_dir).is_dir():
+            return False, f"Compose working directory is not available locally: {working_dir}"
+        cmd = [str(self.docker_bin), "compose", "-p", project_name]
+        for filename in (f.strip() for f in config_file.split(",") if f.strip()):
+            path = Path(working_dir or ".") / filename
+            if not path.is_file():
+                return False, f"Compose config is not available locally: {path}. Copy the remote config to this machine before running Compose."
+            cmd += ["-f", filename]
+        cmd += actions[action]
+        timeout = max(self.timeout, 300.0) if action in ("build", "up", "up-build") else self.timeout
+        success, msg = self._run_capture(
+            cmd, action=f"running compose {action}", timeout=timeout, cwd=working_dir,
+        )
+        return success, msg.strip() or f"Compose {action} {'succeeded' if success else 'failed'}."
 
     # ------------------------------------------------------------------ compose snippet
 

@@ -22,6 +22,7 @@ A release focused on people who run Docker hosts: scriptable health checks, diag
 - `py.typed` marker, `Typing :: Typed` and sysadmin classifiers; CI integration job against a real Docker daemon; CLI smoke tests; release workflow attaches the wheel and sdist to the GitHub release and checks the tag matches the package version.
 
 ### Fixed
+- Compose lifecycle commands now place project/file options after `docker compose`, retain ordered override files, validate local config paths, and use a longer timeout for builds. Real Compose lifecycle coverage runs in integration CI.
 - Logs, pulls and interactive exec now receive the same per-client Docker connection as snapshots. Constructors no longer modify global DOCKER_HOST; explicit hosts override DOCKER_CONTEXT. Named active endpoints apply to all commands, and switching endpoints clears old data and streams.
 - Docker collection errors no longer appear as empty successful results: `check` returns UNKNOWN (3), including missing requested resource metrics; `status --json` emits a structured error. The dashboard keeps its last successful snapshot with a stale-data warning.
 - **Dropped key presses on Linux/macOS**: the terminal was switched into raw mode only for 50 ms per poll using `TCSAFLUSH`, which discarded keys typed in between and echoed arrow-key escape sequences onto the screen. The terminal now stays in cbreak mode for the whole session and is restored for prompts, interactive `exec` and on exit.
