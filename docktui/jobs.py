@@ -25,8 +25,12 @@ class JobRunner:
             return bool(self._active)
 
     def submit(
-        self, key: str, generation: int, work: Callable[[threading.Event], Any],
-        apply: Callable[[Any], None], on_error: Optional[Callable[[Exception], None]] = None,
+        self,
+        key: str,
+        generation: int,
+        work: Callable[[threading.Event], Any],
+        apply: Callable[[Any], None],
+        on_error: Optional[Callable[[Exception], None]] = None,
     ) -> bool:
         with self._condition:
             if self._closed or key in self._active:
@@ -34,6 +38,7 @@ class JobRunner:
             cancel = threading.Event()
             self._active[key] = cancel
             self._working += 1
+
         def execute() -> None:
             value, error = None, None
             try:
@@ -46,6 +51,7 @@ class JobRunner:
                 with self._condition:
                     self._working -= 1
                     self._condition.notify_all()
+
         self._executor.submit(execute)
         return True
 
@@ -81,7 +87,9 @@ class JobRunner:
         self._executor.shutdown(wait=False)
 
 
-def run_cancellable(cmd: list[str], cancel: threading.Event, **kwargs) -> subprocess.CompletedProcess:
+def run_cancellable(
+    cmd: list[str], cancel: threading.Event, **kwargs
+) -> subprocess.CompletedProcess:
     """subprocess.run semantics with bounded waits and explicit cancellation."""
     check = kwargs.pop("check", False)
     timeout = kwargs.pop("timeout", None)
@@ -98,7 +106,9 @@ def run_cancellable(cmd: list[str], cancel: threading.Event, **kwargs) -> subpro
         try:
             while True:
                 if cancel.is_set():
-                    raise RuntimeError("Operation canceled; Docker-side work may already have started.")
+                    raise RuntimeError(
+                        "Operation canceled; Docker-side work may already have started."
+                    )
                 if deadline is not None and time.monotonic() >= deadline:
                     raise subprocess.TimeoutExpired(cmd, timeout)
                 try:

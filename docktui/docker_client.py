@@ -73,7 +73,11 @@ class DockerClient:
         """Freeze connection selection for a sequence of Docker commands."""
         client = copy.copy(self)
         client._environment = self.command_env()
-        if context and not client._environment.get("DOCKER_HOST") and not client._environment.get("DOCKER_CONTEXT"):
+        if (
+            context
+            and not client._environment.get("DOCKER_HOST")
+            and not client._environment.get("DOCKER_CONTEXT")
+        ):
             client._environment["DOCKER_CONTEXT"] = context
         return client
 

@@ -1,15 +1,11 @@
 """Logs view rendering."""
 
-from typing import Any
+from typing import Any, Optional
+
 from .. import styles as palette
-from typing import Optional
 from ..enums import ViewMode
-from ..screen import clear_screen
 from ..log_format import colorize_log_line
-from ..screen import draw_frame
-from ..screen import get_terminal_size
-from ..screen import pad_to_viewport
-from ..screen import slice_viewport
+from ..screen import clear_screen, draw_frame, get_terminal_size, pad_to_viewport, slice_viewport
 
 
 class LogsViews:
@@ -60,4 +56,3 @@ class LogsViews:
         print(
             f"{palette.CYAN}[Up/Down] Scroll | [F] Follow | [Space] Pause | [/] Search | [N] Next | [E] Errors | [H] Highlights | [O] Export | [+/-] Limit | [Esc/L] Back{palette.RESET}"
         )
-

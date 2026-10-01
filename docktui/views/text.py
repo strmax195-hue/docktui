@@ -1,13 +1,10 @@
 """Text view rendering."""
 
 from typing import Any
+
 from .. import styles as palette
 from ..enums import ViewMode
-from ..screen import clear_screen
-from ..screen import draw_frame
-from ..screen import get_terminal_size
-from ..screen import pad_to_viewport
-from ..screen import slice_viewport
+from ..screen import clear_screen, draw_frame, get_terminal_size, pad_to_viewport, slice_viewport
 
 
 class TextViews:
@@ -34,7 +31,9 @@ class TextViews:
             print(line[: width - 1])
         pad_to_viewport(len(visible), viewport_height)
         print("\n" + "═" * (width - 1))
-        print(f"{palette.CYAN}[Up/Down] Scroll | [O] Export | [Esc/{back_keys}] Back{palette.RESET}")
+        print(
+            f"{palette.CYAN}[Up/Down] Scroll | [O] Export | [Esc/{back_keys}] Back{palette.RESET}"
+        )
 
     def draw_inspect_view(self: Any) -> None:
         if not self.containers:
@@ -110,7 +109,12 @@ class TextViews:
         draw_frame("DOCKER SYSTEM DISK USAGE & CLEANUP", width)
         if not self.system_info_text:
             self.system_info_text = "Loading…"
-            self._docker_job("view:disk", "get_disk_usage", (), lambda value: setattr(self, "system_info_text", value))
+            self._docker_job(
+                "view:disk",
+                "get_disk_usage",
+                (),
+                lambda value: setattr(self, "system_info_text", value),
+            )
         print(self.system_info_text)
         print(
             f"\n{palette.YELLOW}Preview:{palette.RESET} Docker does not provide a dry-run for prune; review the disk usage above before confirming."
@@ -119,4 +123,3 @@ class TextViews:
         print(
             f"{palette.CYAN}[X] System prune | [I] Image prune | [V] Volume prune | [A] System prune + volumes | [Esc/P] Back{palette.RESET}"
         )
-

@@ -181,5 +181,3 @@ except ImportError:  # Unix / macOS
         finally:
             if was_managed:
                 init_terminal()
-
-

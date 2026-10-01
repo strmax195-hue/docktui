@@ -3,12 +3,14 @@ import signal
 import subprocess
 import sys
 import unittest
+import time
 
 
 @unittest.skipUnless(os.name == "posix", "Unix PTY coverage")
 class TestTerminal(unittest.TestCase):
     def test_resize_state_lives_in_terminal_module(self):
         from docktui import terminal
+
         terminal.RESIZE_REQUESTED = False
         terminal.handle_resize()
         self.assertTrue(terminal.RESIZE_REQUESTED)
@@ -17,9 +19,11 @@ class TestTerminal(unittest.TestCase):
         import pty
         import select
         import termios
+
         code = (
             "from docktui.tui import ContainerDashboard\n"
             "d=ContainerDashboard();d.client.docker_bin=None\n"
+            "d.enable_mouse_tracking=lambda: print('PTY_READY', flush=True)\n"
             "try: d.run()\n"
             "except KeyboardInterrupt: pass\n"
         )
@@ -27,16 +31,28 @@ class TestTerminal(unittest.TestCase):
             with self.subTest(interrupt=interrupt):
                 master, slave = pty.openpty()
                 before = termios.tcgetattr(slave)
-                process = subprocess.Popen([sys.executable, "-c", code], stdin=slave, stdout=slave, stderr=slave)
+                process = subprocess.Popen(
+                    [sys.executable, "-c", code], stdin=slave, stdout=slave, stderr=slave
+                )
                 try:
-                    self.assertTrue(select.select([master], [], [], 3)[0])
-                    os.read(master, 65536)
+                    output = b""
+                    deadline = time.monotonic() + 10
+                    while b"PTY_READY" not in output and time.monotonic() < deadline:
+                        if select.select([master], [], [], 0.1)[0]:
+                            output += os.read(master, 65536)
+                    self.assertIn(b"PTY_READY", output)
                     process.send_signal(signal.SIGWINCH)
                     if interrupt:
                         process.send_signal(signal.SIGINT)
                     else:
                         os.write(master, b"q")
-                    self.assertEqual(process.wait(timeout=3), 0)
+                    # macOS PTYs have small output buffers; keep draining while
+                    # the dashboard redraws and restores the terminal.
+                    deadline = time.monotonic() + 5
+                    while process.poll() is None and time.monotonic() < deadline:
+                        if select.select([master], [], [], 0.05)[0]:
+                            output += os.read(master, 65536)
+                    self.assertEqual(process.wait(timeout=1), 0, output.decode(errors="replace"))
                     self.assertEqual(termios.tcgetattr(slave), before)
                 finally:
                     if process.poll() is None:
