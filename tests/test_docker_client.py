@@ -320,7 +320,7 @@ class TestDockerClient(unittest.TestCase):
             # Test constructor sets env
             client = DockerClient(host="ssh://testuser@192.168.1.50:2222")
             self.assertEqual(client.docker_host, "ssh://testuser@192.168.1.50:2222")
-            self.assertEqual(os.environ.get("DOCKER_HOST"), "ssh://testuser@192.168.1.50:2222")
+            self.assertEqual(client.docker_host, "ssh://testuser@192.168.1.50:2222")
 
             # Test parsing SSH with port
             parsed = client.parse_docker_host()
@@ -393,9 +393,9 @@ class TestDockerClient(unittest.TestCase):
             self.assertEqual(client.docker_host, "ssh://new@host")
             # The process env is NOT mutated by set_host.
             self.assertIsNone(os.environ.get("DOCKER_HOST"))
-            # And the legacy constructor with a host DOES mutate env.
+            # The constructor also keeps the process environment unchanged.
             DockerClient(host="ssh://legacy@host")
-            self.assertEqual(os.environ.get("DOCKER_HOST"), "ssh://legacy@host")
+            self.assertIsNone(os.environ.get("DOCKER_HOST"))
         finally:
             if orig is not None:
                 os.environ["DOCKER_HOST"] = orig

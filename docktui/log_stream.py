@@ -23,11 +23,13 @@ class LineStreamer:
         on_line: Optional[Callable[[str], None]] = None,
         on_stop: Optional[Callable[[], None]] = None,
         text: bool = True,
+        env: Optional[dict[str, str]] = None,
     ) -> None:
         self.cmd = cmd
         self.on_line = on_line
         self.on_stop = on_stop
         self.text = text
+        self.env = dict(env) if env is not None else None
         self._process: Optional[subprocess.Popen] = None
         self._threads: list[threading.Thread] = []
         self._stop_event = threading.Event()
@@ -55,6 +57,7 @@ class LineStreamer:
                 encoding="utf-8" if self.text else None,
                 errors="replace" if self.text else None,
                 bufsize=1,
+                env=self.env,
             )
         except (OSError, ValueError) as exc:
             return f"Error starting stream: {exc}"

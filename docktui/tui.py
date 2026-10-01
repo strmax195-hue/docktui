@@ -320,7 +320,9 @@ class ContainerDashboard:
             exec_presets=list(exec_presets) if exec_presets else list(DEFAULT_EXEC_PRESETS),
         )
         self.config.validate()
-        self.client = DockerClient(timeout=self.config.docker_timeout, host=docker_host)
+        self.client = DockerClient(
+            timeout=self.config.docker_timeout, host=self.config.resolve_host(docker_host)
+        )
         self.theme = self.config.theme
         apply_theme_colors(self.theme)
 
@@ -336,7 +338,9 @@ class ContainerDashboard:
         self.compose_rows: list[dict[str, Any]] = []
         self.active_container: Optional[dict[str, str]] = None
         self.active_project: Optional[str] = None
-        self.active_endpoint: Optional[str] = None
+        self.active_endpoint: Optional[str] = (
+            self.config.active_endpoint if self.client.host else None
+        )
         self.endpoints: list[dict[str, str]] = list(self.config.endpoints)
 
         self.selected_index = 0
@@ -756,7 +760,7 @@ class ContainerDashboard:
         else:
             cmd += ["logs", "-f", f"--tail={self.log_tail_limit}", container_id]  # type: ignore
 
-        streamer = LineStreamer(cmd, on_line=self._on_log_line)
+        streamer = LineStreamer(cmd, on_line=self._on_log_line, env=self.client.command_env())
         error = streamer.start()
         if error is not None:
             self.set_status(error)
@@ -905,11 +909,15 @@ class ContainerDashboard:
             self.need_redraw = True
 
     def _refresh_data(self) -> None:
-        current_context = self.client.get_current_context()
+        generation = self.client.connection_generation
+        client = self.client.snapshot()
+        current_context = client.get_current_context()
         if self.current_tab in ("containers", "compose"):
-            containers = self.sort_containers(self.client.list_containers())
-            stats = self.client.get_container_stats() if containers else {}
+            containers = self.sort_containers(client.list_containers())
+            stats = client.get_container_stats() if containers else {}
             with self.data_lock:
+                if generation != self.client.connection_generation:
+                    return
                 self.current_context = current_context
                 self.containers = containers
                 self.stats = stats
@@ -921,7 +929,7 @@ class ContainerDashboard:
                     self.selected_index = 0
                     self.selected_compose_index = 0
         elif self.current_tab == "images":
-            images = self.client.list_images()
+            images = client.list_images()
             filter_val = (self.filters.get("images") or "").lower()
             if filter_val:
                 images = [
@@ -932,12 +940,14 @@ class ContainerDashboard:
                     or filter_val in img["id"].lower()
                 ]
             with self.data_lock:
+                if generation != self.client.connection_generation:
+                    return
                 self.current_context = current_context
                 self.images = images
                 if self.selected_image_index >= len(self.images):
                     self.selected_image_index = max(0, len(self.images) - 1)
         elif self.current_tab == "volumes":
-            volumes = self.client.list_volumes()
+            volumes = client.list_volumes()
             filter_val = (self.filters.get("volumes") or "").lower()
             if filter_val:
                 volumes = [
@@ -946,12 +956,14 @@ class ContainerDashboard:
                     if filter_val in v["name"].lower() or filter_val in v["driver"].lower()
                 ]
             with self.data_lock:
+                if generation != self.client.connection_generation:
+                    return
                 self.current_context = current_context
                 self.volumes = volumes
                 if self.selected_volume_index >= len(self.volumes):
                     self.selected_volume_index = max(0, len(self.volumes) - 1)
         elif self.current_tab == "networks":
-            networks = self.client.list_networks()
+            networks = client.list_networks()
             filter_val = (self.filters.get("networks") or "").lower()
             if filter_val:
                 networks = [
@@ -962,12 +974,14 @@ class ContainerDashboard:
                     or filter_val in n["id"].lower()
                 ]
             with self.data_lock:
+                if generation != self.client.connection_generation:
+                    return
                 self.current_context = current_context
                 self.networks = networks
                 if self.selected_network_index >= len(self.networks):
                     self.selected_network_index = max(0, len(self.networks) - 1)
         elif self.current_tab == "contexts":
-            contexts = self.client.list_contexts()
+            contexts = client.list_contexts()
             filter_val = (self.filters.get("contexts") or "").lower()
             if filter_val:
                 contexts = [
@@ -978,6 +992,8 @@ class ContainerDashboard:
                     or filter_val in ctx["description"].lower()
                 ]
             with self.data_lock:
+                if generation != self.client.connection_generation:
+                    return
                 self.current_context = current_context
                 self.contexts = contexts
                 if self.selected_context_index >= len(self.contexts):
@@ -1852,6 +1868,7 @@ class ContainerDashboard:
             self.client.pull_image_args(repo),
             on_line=on_line,
             on_stop=on_stop,
+            env=self.client.command_env(),
         )
         err = streamer.start()
         if err is not None:
@@ -1992,7 +2009,7 @@ class ContainerDashboard:
         self.start_input("New endpoint: name|host|description (description optional): ", submit)
 
     def use_selected_context(self) -> None:
-        if self.client.docker_host:
+        if self.client.docker_host or self.client.command_env().get("DOCKER_CONTEXT"):
             self.set_status("Cannot switch context: DOCKER_HOST is active and overrides context.")
             return
         if self.current_tab == "contexts" and self.contexts:
@@ -2015,7 +2032,34 @@ class ContainerDashboard:
         if not host:
             self.set_status("Endpoint has no host.")
             return
-        self.client.set_host(host)
+        self.stop_log_stream()
+        if self.pull_streamer is not None:
+            self.pull_streamer.stop()
+            self.pull_streamer = None
+        with self.data_lock:
+            self.client.set_host(host)
+            for name in (
+                "containers",
+                "images",
+                "volumes",
+                "networks",
+                "contexts",
+                "compose_rows",
+                "log_lines",
+                "details_lines",
+                "inspect_lines",
+            ):
+                setattr(self, name, [])
+            self.stats = {}
+            self.active_container = None
+            self.active_project = None
+            self.pinned_view = None
+            self.pinned_target = None
+            self.pinned_project = None
+            self.selected_index = self.selected_compose_index = 0
+            self.last_refresh = 0.0
+            self.daemon_running = False
+            self.last_daemon_check = 0.0
         self.active_endpoint = endpoint.get("name")
         self.config.active_endpoint = self.active_endpoint
         self.set_status(f"Switched to endpoint {endpoint.get('name', '?')} ({host}).")
@@ -2284,7 +2328,7 @@ class ContainerDashboard:
         cmd = [self.client.docker_bin, "exec", "-it", container_id] + cmd_parts
         try:
             with cooked_terminal():
-                subprocess.run(cmd)
+                subprocess.run(cmd, env=self.client.command_env())
         except Exception as e:
             print(f"Error running interactive session: {e}")
             self.prompt_user("Press Enter to continue...")

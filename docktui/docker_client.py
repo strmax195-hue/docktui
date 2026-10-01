@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import shlex
@@ -23,11 +24,8 @@ class DockerClient:
         # Per-instance DOCKER_HOST override. Used as a property so callers
         # can assign to `client.host` to clear or change it.
         self._host_override: Optional[str] = host
-        # Backwards compatibility: a `host` value also pins the process env
-        # so the legacy `--host` CLI flag keeps working for subprocesses
-        # spawned by external tools.
-        if host:
-            os.environ["DOCKER_HOST"] = host
+        self._environment: Optional[dict[str, str]] = None
+        self.connection_generation = 0
 
     # ------------------------------------------------------------------ host
 
@@ -44,7 +42,8 @@ class DockerClient:
         """Return the active DOCKER_HOST (per-instance override takes precedence)."""
         if self._host_override:
             return self._host_override
-        return os.environ.get("DOCKER_HOST")
+        env = self._environment if self._environment is not None else os.environ
+        return None if env.get("DOCKER_CONTEXT") else env.get("DOCKER_HOST")
 
     def set_host(self, host: Optional[str]) -> None:
         """Update the per-instance DOCKER_HOST without touching the process env.
@@ -52,11 +51,26 @@ class DockerClient:
         Pass ``None`` to clear the override (the process env, if any, is used).
         """
         self._host_override = host
+        self.connection_generation += 1
+
+    def command_env(self) -> dict[str, str]:
+        """An independent connection environment for every subprocess."""
+        env = dict(self._environment if self._environment is not None else os.environ)
+        if self._host_override:
+            env.pop("DOCKER_CONTEXT", None)
+            env["DOCKER_HOST"] = self._host_override
+        return env
 
     def _env(self) -> Optional[dict[str, str]]:
-        if not self._host_override:
-            return None
-        return {**os.environ, "DOCKER_HOST": self._host_override}
+        if self._host_override or self._environment is not None:
+            return self.command_env()
+        return None
+
+    def snapshot(self) -> "DockerClient":
+        """Freeze connection selection for a sequence of Docker commands."""
+        client = copy.copy(self)
+        client._environment = self.command_env()
+        return client
 
     def parse_docker_host(self) -> Optional[dict[str, str]]:
         """Parse DOCKER_HOST into protocol/user/host/port/display parts."""

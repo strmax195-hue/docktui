@@ -342,6 +342,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     file_config = load_config(config_path)
     config = _build_config_from_args(args, file_config, config_path or Config.find_existing_path())
 
+    try:
+        args.host = config.resolve_host(args.host)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     handler = COMMANDS.get(args.command or "")
     if handler is not None:
         sys.exit(handler(args, config))

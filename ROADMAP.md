@@ -56,7 +56,7 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 ## Reliability improvements
 
 - [x] Distinguish failed Docker collection from an empty successful result; preserve stale dashboard snapshots and return UNKNOWN for failed health checks.
-- [ ] Apply the selected connection to every subprocess.
+- [x] Apply the selected connection to every subprocess.
 - [ ] Correct Compose argument ordering and validate config paths.
 - [ ] Bound streaming buffers and reliably finish background processes.
 - [ ] Keep TUI navigation responsive during slow operations.
