@@ -5,6 +5,7 @@ import shlex
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +29,7 @@ class DockerClient:
         self._host_override: Optional[str] = host
         self._environment: Optional[dict[str, str]] = None
         self.connection_generation = 0
+        self.deadline: Optional[float] = None
         self.cancel_event: Optional[threading.Event] = None
 
     # ------------------------------------------------------------------ host
@@ -148,6 +150,8 @@ class DockerClient:
 
     def _error_message(self, exc: Exception) -> str:
         if isinstance(exc, subprocess.TimeoutExpired):
+            if self.deadline is not None:
+                return "Host deadline exceeded while collecting Docker data."
             return _format_timeout_message(self.timeout, "collecting Docker data")
         if isinstance(exc, subprocess.CalledProcessError):
             detail = exc.stderr or exc.stdout
@@ -159,6 +163,11 @@ class DockerClient:
     def _run(self, cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
         """Run a Docker CLI command with default timeout and per-instance env."""
         kwargs.setdefault("timeout", self.timeout)
+        if self.deadline is not None:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, self.timeout)
+            kwargs["timeout"] = min(kwargs["timeout"], remaining)
         env = kwargs.pop("env", None) or self._env()
         if env is not None:
             kwargs["env"] = env
