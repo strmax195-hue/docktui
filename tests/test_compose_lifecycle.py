@@ -11,13 +11,16 @@ class TestComposeLifecycle(unittest.TestCase):
         client.docker_bin = "docker"
         with (
             patch("pathlib.Path.is_file", return_value=True),
-            patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "ok", "")) as run,
+            patch(
+                "subprocess.run", return_value=subprocess.CompletedProcess([], 0, "ok", "")
+            ) as run,
         ):
             success, _ = client.run_compose_cmd("shop", "base.yml, override.yml", "up")
         self.assertTrue(success)
-        self.assertEqual(run.call_args.args[0], [
-            "docker", "compose", "-p", "shop", "-f", "base.yml", "-f", "override.yml", "up", "-d"
-        ])
+        self.assertEqual(
+            run.call_args.args[0],
+            ["docker", "compose", "-p", "shop", "-f", "base.yml", "-f", "override.yml", "up", "-d"],
+        )
 
     def test_missing_remote_config_never_runs_another_local_stack(self):
         client = DockerClient(host="ssh://prod")

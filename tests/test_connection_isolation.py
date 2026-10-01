@@ -71,4 +71,3 @@ class TestConnectionIsolation(unittest.TestCase):
         self.assertEqual(dashboard.containers, [])
         self.assertEqual(dashboard.log_lines, [])
         stop.assert_called_once()
-

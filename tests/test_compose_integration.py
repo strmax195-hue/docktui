@@ -16,7 +16,7 @@ class TestComposeIntegration(unittest.TestCase):
         project = "docktui-test-" + uuid.uuid4().hex[:12]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "Dockerfile").write_text("FROM busybox\nCMD [\"sleep\", \"600\"]\n")
+            (root / "Dockerfile").write_text('FROM busybox\nCMD ["sleep", "600"]\n')
             compose = root / "compose.yml"
             compose.write_text("services:\n  web:\n    build: .\n    command: sleep 600\n")
             try:
@@ -27,6 +27,8 @@ class TestComposeIntegration(unittest.TestCase):
                 self.assertTrue(any(r["compose_project"] == project for r in rows))
                 success, message = client.run_compose_cmd(project, str(compose), "down")
                 self.assertTrue(success, message)
-                self.assertFalse(any(r["compose_project"] == project for r in client.list_containers()))
+                self.assertFalse(
+                    any(r["compose_project"] == project for r in client.list_containers())
+                )
             finally:
                 client.run_compose_cmd(project, str(compose), "down")

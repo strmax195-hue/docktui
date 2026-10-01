@@ -977,7 +977,10 @@ class DockerClient:
         return out or "(Command executed with no output)"
 
     def run_compose_cmd(
-        self, project_name: str, config_file: str, action: str,
+        self,
+        project_name: str,
+        config_file: str,
+        action: str,
         working_dir: Optional[str] = None,
     ) -> tuple[bool, str]:
         if not self.is_docker_installed():
@@ -997,12 +1000,20 @@ class DockerClient:
         for filename in (f.strip() for f in config_file.split(",") if f.strip()):
             path = Path(working_dir or ".") / filename
             if not path.is_file():
-                return False, f"Compose config is not available locally: {path}. Copy the remote config to this machine before running Compose."
+                return (
+                    False,
+                    f"Compose config is not available locally: {path}. Copy the remote config to this machine before running Compose.",
+                )
             cmd += ["-f", filename]
         cmd += actions[action]
-        timeout = max(self.timeout, 300.0) if action in ("build", "up", "up-build") else self.timeout
+        timeout = (
+            max(self.timeout, 300.0) if action in ("build", "up", "up-build") else self.timeout
+        )
         success, msg = self._run_capture(
-            cmd, action=f"running compose {action}", timeout=timeout, cwd=working_dir,
+            cmd,
+            action=f"running compose {action}",
+            timeout=timeout,
+            cwd=working_dir,
         )
         return success, msg.strip() or f"Compose {action} {'succeeded' if success else 'failed'}."
 
