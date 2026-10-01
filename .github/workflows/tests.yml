@@ -37,7 +37,17 @@ jobs:
         run: python -m pip install -e .[dev]
 
       - name: Run unit tests with pytest
-        run: pytest --cov=docktui --cov-report=term tests/
+        run: pytest --cov=docktui --cov-report=term --cov-report=json --cov-fail-under=50 tests/
+
+      - name: Enforce measured branch baseline
+        run: python -c "import json; t=json.load(open('coverage.json'))['totals']; p=100*t['covered_branches']/max(1,t['num_branches']); print(f'Branch coverage {p:.2f}%'); assert p >= 35"
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-baseline
+          path: coverage.json
 
       - name: CLI smoke test
         run: |
@@ -65,7 +75,18 @@ jobs:
           docker run -d --name ci-healthy --health-cmd "true" --health-interval 1s busybox sleep 600
           docker run -d --name ci-unhealthy --health-cmd "false" --health-interval 1s --health-retries 1 busybox sleep 600
           docker run --name ci-crashed busybox sh -c "exit 3" || true
-          sleep 5
+          python - <<'PYWAIT'
+          import json, subprocess, time
+          deadline = time.monotonic() + 40
+          while time.monotonic() < deadline:
+              rows = json.loads(subprocess.check_output(["docker", "inspect", "ci-healthy", "ci-unhealthy"]))
+              states = [r["State"]["Health"]["Status"] for r in rows]
+              if states == ["healthy", "unhealthy"]:
+                  break
+              time.sleep(0.2)
+          else:
+              raise SystemExit(f"healthcheck timeout: {states}")
+          PYWAIT
 
       - name: Compose lifecycle integration
         env:
@@ -73,7 +94,15 @@ jobs:
         run: python -m unittest tests.test_compose_integration -v
 
       - name: docktui doctor
-        run: docktui doctor || true
+        run: |
+          docktui doctor
+          python - <<'PYDOCTOR'
+          from docktui.doctor import run_checks
+          from docktui.docker_client import DockerClient
+          rows = run_checks(DockerClient())
+          for title in ("Docker CLI", "Docker daemon", "Docker Compose"):
+              assert any(r.title == title and r.status == "ok" for r in rows), rows
+          PYDOCTOR
 
       - name: docktui status
         run: |

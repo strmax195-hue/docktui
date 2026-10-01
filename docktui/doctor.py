@@ -138,7 +138,7 @@ def check_config(path: Optional[Path]) -> CheckResult:
         return CheckResult(FAIL, "Config file", f"{target} does not exist")
     error = Config.validate_file(target)
     if error:
-        return CheckResult(FAIL, "Config file", f"{target}: {error}", "Fix the JSON syntax.")
+        return CheckResult(FAIL, "Config file", f"{target}: {error}", "Fix the JSON syntax and reported setting values.")
     return CheckResult(OK, "Config file", str(target))
 
 

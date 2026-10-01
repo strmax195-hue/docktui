@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import mock_open, patch
 
@@ -391,6 +392,12 @@ class TestAdminWorkflows(unittest.TestCase):
 
 
 class TestLogColoringAndThemes(unittest.TestCase):
+    def setUp(self):
+        self.environment = patch.dict("os.environ", {})
+        self.environment.start()
+        os.environ.pop("NO_COLOR", None)
+        self.addCleanup(self.environment.stop)
+
     def tearDown(self):
         from docktui import tui
 
