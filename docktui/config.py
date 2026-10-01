@@ -51,6 +51,10 @@ class Config:
     refresh_interval_networks: float = DEFAULT_REFRESH_INTERVAL_NETWORKS
     docker_timeout: float = DEFAULT_DOCKER_TIMEOUT
     theme: str = DEFAULT_THEME
+    log_since: str = ""
+    log_until: str = ""
+    log_timestamps: bool = False
+    log_presets: dict[str, list[dict[str, str]]] = field(default_factory=dict)
     log_tail_limit: int = DEFAULT_LOG_TAIL_LIMIT
     log_tail_step: int = DEFAULT_LOG_TAIL_STEP
     log_max: int = DEFAULT_LOG_MAX
@@ -75,7 +79,12 @@ class Config:
         if self.exec_presets is None:
             self.exec_presets = list(DEFAULT_EXEC_PRESETS)
         if self.log_highlights is None:
-            self.log_highlights = []
+            self.log_presets = {
+            key: [h for h in highlights if self._valid_highlight(h)]
+            for key, highlights in self.log_presets.items()
+            if isinstance(key, str) and isinstance(highlights, list)
+        }
+        self.log_highlights = []
         if self.endpoints is None:
             self.endpoints = []
         if self.hotkey_overlays is None:
@@ -245,6 +254,13 @@ class Config:
             clean["theme"] = "high_contrast"
         if clean.get("theme") not in AVAILABLE_THEMES:
             clean["theme"] = DEFAULT_THEME
+        for key in ("log_since", "log_until"):
+            if not isinstance(clean.get(key, ""), str):
+                clean.pop(key, None)
+        if not isinstance(clean.get("log_timestamps", False), bool):
+            clean.pop("log_timestamps", None)
+        if not isinstance(clean.get("log_presets", {}), dict):
+            clean.pop("log_presets", None)
         config = cls(**clean)
         config.validate()
         return config
@@ -292,6 +308,11 @@ class Config:
         if self.theme not in AVAILABLE_THEMES:
             self.theme = DEFAULT_THEME
         self.exec_presets = [str(p) for p in (self.exec_presets or []) if str(p).strip()]
+        self.log_presets = {
+            key: [h for h in highlights if self._valid_highlight(h)]
+            for key, highlights in self.log_presets.items()
+            if isinstance(key, str) and isinstance(highlights, list)
+        }
         self.log_highlights = [h for h in (self.log_highlights or []) if self._valid_highlight(h)]
         self.endpoints = [e for e in (self.endpoints or []) if self._valid_endpoint(e)]
         unique = {e["name"]: e for e in self.endpoints}
@@ -378,4 +399,15 @@ class Config:
             for k, v in overlays.items()
         ):
             errors.append("hotkey_overlays must map keys to non-empty command strings")
+        presets = raw.get("log_presets", {})
+        if not isinstance(presets, dict) or any(
+            not isinstance(k, str) or not isinstance(v, list) or any(not cls._valid_highlight(h) for h in v)
+            for k, v in presets.items()
+        ):
+            errors.append("log_presets must map target keys to valid highlight patterns")
+        for key in ("log_since", "log_until"):
+            if not isinstance(raw.get(key, ""), str):
+                errors.append(f"{key} must be a Docker time string")
+        if not isinstance(raw.get("log_timestamps", False), bool):
+            errors.append("log_timestamps must be a boolean")
         return errors

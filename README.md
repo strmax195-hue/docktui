@@ -416,3 +416,20 @@ Details (`V`) shows the latest healthcheck probe time, exit code and output
 container die/restart/OOM/health/destroy events. Disconnects are displayed; the
 feed reconnects using its last nanosecond cursor and suppresses replayed events.
 Events use the selected connection and stop on endpoint switches or app exit.
+
+### Log windows and target highlights
+
+In Logs, `W` sets `SINCE,UNTIL` (Docker duration or timestamp strings); empty
+values clear boundaries. `T` toggles timestamps. A finite Until window disables
+follow; clear Until before enabling it. Errors-only, search and clear-filter
+operate on the retained bounded history, so changing them preserves lines.
+
+Persistent defaults use `log_since`, `log_until`, `log_timestamps`. Highlight
+presets are selected by container name, then Compose service, then project:
+
+```json
+{"log_presets": {"service:app/web": [{"label": "failures", "pattern": "panic|fatal"}]}}
+```
+
+Target keys also accept `container:web-1` and `project:app`; global
+`log_highlights` remains the fallback. `H` toggles the selected patterns.
