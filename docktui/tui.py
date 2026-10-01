@@ -1,25 +1,28 @@
 """Main DockTUI TUI.
 
 This module is the dashboard orchestrator. It owns the input loop, the data
-shaping, the help screen, and the modal input flow. Drawing helpers live in
-`styles` and `screen`; cross-platform key capture lives at the bottom of this
-file; everything else is delegated to small methods that views call.
+state, jobs, and modal input flow. Terminal input lives in `terminal`;
+rendering lives in `views`, with shared helpers in `styles` and `screen`.
 """
 
-import contextlib
 import os
 import re
 import shlex
-import signal
 import subprocess
 import threading
 import time
 from collections import deque
-from collections.abc import Iterator
 from typing import Any, Callable, Optional
 
 from . import screen as _screen_module
 from . import styles as _styles
+from . import terminal as _terminal
+from .terminal import PLATFORM, cooked_terminal, get_key_nonblocking, init_terminal, restore_terminal
+from .log_format import colorize_log_line as colorize_log_line, _log_matches_filter, _log_is_error_line
+from .views.dashboard import DashboardViews
+from .views.logs import LogsViews
+from .views.text import TextViews
+from .views.dialogs import DialogsViews
 from .config import Config
 from .constants import (
     AVAILABLE_TABS,
@@ -35,29 +38,17 @@ from .enums import ComposeAction, StateFilter, ThemeName, ViewMode
 from .jobs import JobRunner
 from .keymap import Keymap, resolve_hotkey_overlay
 from .log_stream import LineStreamer, StreamResult
-from .screen import (
-    clear_screen,
-    draw_frame,
-    draw_status_bar,
-    get_terminal_size,
-    list_window,
-    pad_to_viewport,
-    scroll_step,
-    slice_viewport,
-    truncate,
-    viewport_height_for,
-    wrap_hints,
-)
+from .screen import clear_screen, get_terminal_size, scroll_step, viewport_height_for
 from .snapshot import DashboardSnapshot, collect_snapshot, sort_container_rows
 from .styles import (
-    BOLD,
-    CYAN,
-    GREEN,
-    MAGENTA,
-    RED,
-    RESET,
-    WHITE_ON_BLUE,
-    YELLOW,
+    BOLD as BOLD,
+    CYAN as CYAN,
+    GREEN as GREEN,
+    MAGENTA as MAGENTA,
+    RED as RED,
+    RESET as RESET,
+    WHITE_ON_BLUE as WHITE_ON_BLUE,
+    YELLOW as YELLOW,
 )
 
 _THEMED_NAMES = (
@@ -92,216 +83,11 @@ def apply_theme_colors(theme_name: Optional[str] = None) -> str:
 # Cross-platform keyboard input
 # ---------------------------------------------------------------------------
 
-RESIZE_REQUESTED = False
-
-
-def handle_resize(_signum=None, _frame=None):
-    global RESIZE_REQUESTED
-    RESIZE_REQUESTED = True
-
-
-if hasattr(signal, "SIGWINCH"):
-    try:
-        signal.signal(signal.SIGWINCH, handle_resize)
-    except Exception:
-        pass
-
-
-try:
-    import msvcrt  # type: ignore[import-not-found]
-
-    PLATFORM = "windows"
-
-    def init_terminal() -> None:
-        os.system("")
-
-    def restore_terminal() -> None:
-        return None
-
-    @contextlib.contextmanager
-    def cooked_terminal() -> Iterator[None]:
-        yield
-
-    def get_key_nonblocking() -> Optional[str]:
-        if msvcrt.kbhit():  # type: ignore[attr-defined]
-            ch = msvcrt.getch()  # type: ignore[attr-defined]
-            if ch in (b"\x00", b"\xe0"):
-                ch2 = msvcrt.getch()  # type: ignore[attr-defined]
-                if ch2 == b"H":
-                    return "up"
-                if ch2 == b"P":
-                    return "down"
-            if ch in (b"\r", b"\n"):
-                return "enter"
-            if ch in (b"\x08", b"\x7f"):
-                return "backspace"
-            if ch == b"\x1b":
-                return "\x1b"
-            try:
-                return ch.decode("utf-8")
-            except UnicodeDecodeError:
-                return None
-        return None
-
-except ImportError:  # Unix / macOS
-    import codecs
-    import select
-    import sys
-    import termios
-    from collections import deque
-
-    PLATFORM = "unix"
-
-    # The terminal stays in cbreak mode (no echo, no line buffering) for the
-    # whole session. Toggling raw mode around every poll (the old approach)
-    # used TCSAFLUSH, which silently discarded keys pressed between polls and
-    # echoed escape sequences such as arrow keys onto the screen.
-    _ORIGINAL_TERMIOS: Optional[list[Any]] = None
-    _KEY_BUFFER: "deque[str]" = deque()
-    _DECODER = codecs.getincrementaldecoder("utf-8")(errors="replace")
-
-    def init_terminal() -> None:
-        global _ORIGINAL_TERMIOS
-        if not sys.stdin.isatty():
-            return
-        fd = sys.stdin.fileno()
-        if _ORIGINAL_TERMIOS is None:
-            _ORIGINAL_TERMIOS = termios.tcgetattr(fd)
-        attrs = termios.tcgetattr(fd)
-        # IXON off so Ctrl+S reaches the app; ICRNL off so Enter arrives as "\r".
-        attrs[0] &= ~(termios.IXON | termios.ICRNL)
-        attrs[3] &= ~(termios.ICANON | termios.ECHO)
-        attrs[6][termios.VMIN] = 1
-        attrs[6][termios.VTIME] = 0
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-
-    def restore_terminal() -> None:
-        global _ORIGINAL_TERMIOS
-        if _ORIGINAL_TERMIOS is None:
-            return
-        try:
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _ORIGINAL_TERMIOS)
-        except (termios.error, ValueError, OSError):
-            pass
-        _ORIGINAL_TERMIOS = None
-
-    def _fill_key_buffer(timeout: float) -> bool:
-        """Read whatever bytes are pending on stdin into the key buffer."""
-        try:
-            fd = sys.stdin.fileno()
-            rlist, _, _ = select.select([fd], [], [], timeout)
-            if not rlist:
-                return False
-            data = os.read(fd, 1024)
-        except (OSError, ValueError):
-            return False
-        if not data:
-            return False
-        _KEY_BUFFER.extend(_DECODER.decode(data))
-        return True
-
-    def _next_char(timeout: float = 0.05) -> Optional[str]:
-        if not _KEY_BUFFER and not _fill_key_buffer(timeout):
-            return None
-        return _KEY_BUFFER.popleft() if _KEY_BUFFER else None
-
-    def _read_escape_sequence() -> Optional[str]:
-        """Decode the rest of an escape sequence after a leading ESC."""
-        intro = _next_char()
-        if intro is None:
-            return "\x1b"  # a lone Esc key press
-        if intro not in ("[", "O"):
-            _KEY_BUFFER.appendleft(intro)  # Alt+key: report Esc, keep the key
-            return "\x1b"
-        final = _next_char()
-        if final is None:
-            return None
-        if final in ("A", "B"):
-            return "up" if final == "A" else "down"
-        if intro == "[" and final == "M":  # X10 mouse report: 3 more bytes
-            data = "".join(c for c in (_next_char(), _next_char(), _next_char()) if c)
-            if len(data) == 3:
-                cb = ord(data[0])
-                if cb == 96:
-                    return "scroll_up"
-                if cb == 97:
-                    return "scroll_down"
-            return "mouse"
-        # Swallow the remainder of any other CSI sequence (PgUp "5~", F-keys...).
-        while intro == "[" and final is not None and not ("@" <= final <= "~"):
-            final = _next_char()
-        return None
-
-    def get_key_nonblocking() -> Optional[str]:
-        ch = _next_char()
-        if ch is None:
-            return None
-        if ch == "\x1b":
-            return _read_escape_sequence()
-        if ch in ("\r", "\n"):
-            return "enter"
-        if ch in ("\x7f", "\b"):
-            return "backspace"
-        return ch
-
-    @contextlib.contextmanager
-    def cooked_terminal() -> Iterator[None]:
-        """Temporarily hand the terminal back in normal (echo, line) mode."""
-        was_managed = _ORIGINAL_TERMIOS is not None
-        restore_terminal()
-        try:
-            yield
-        finally:
-            if was_managed:
-                init_terminal()
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-ERROR_KEYWORDS = ("error", "warn", "exception")
-
-
-def _log_matches_filter(line: str, needle: str) -> bool:
-    if not needle:
-        return True
-    return needle.lower() in line.lower()
-
-
-def _log_is_error_line(line: str) -> bool:
-    lowered = line.lower()
-    return any(keyword in lowered for keyword in ERROR_KEYWORDS)
-
-
-_LOG_ERROR_RE = re.compile(
-    r"\b(?:ERROR|FATAL|CRITICAL|PANIC|EMERG|ALERT)\b|level=(?:error|fatal|crit)|\bTraceback\b"
-)
-_LOG_WARN_RE = re.compile(r"\b(?:WARN|WARNING)\b|level=warn")
-
-
-def colorize_log_line(line: str, highlight: Optional[re.Pattern] = None) -> str:
-    """Colour a log line by severity and wrap `highlight` matches in bold magenta."""
-    if _LOG_ERROR_RE.search(line):
-        base = RED
-    elif _LOG_WARN_RE.search(line):
-        base = YELLOW
-    else:
-        base = ""
-    text = line
-    if highlight is not None:
-        text = highlight.sub(lambda m: f"{MAGENTA}{BOLD}{m.group(0)}{RESET}{base}", text)
-    if base or text != line:
-        return f"{base}{text}{RESET}"
-    return text
-
-
-# ---------------------------------------------------------------------------
-# Main dashboard
-# ---------------------------------------------------------------------------
-
-
-class ContainerDashboard:
+class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
     """The main TUI rendering and interaction loop."""
 
     def __init__(
@@ -590,8 +376,8 @@ class ContainerDashboard:
         print(f"\r\033[K{YELLOW}{BOLD}{prompt_text}{RESET}", end="", flush=True)
         try:
             if PLATFORM == "windows":
-                while msvcrt.kbhit():  # type: ignore[attr-defined]
-                    msvcrt.getch()  # type: ignore[attr-defined]
+                while _terminal.msvcrt.kbhit():  # type: ignore[attr-defined]
+                    _terminal.msvcrt.getch()  # type: ignore[attr-defined]
             with cooked_terminal():
                 return input().strip()
         except Exception:
@@ -1032,700 +818,38 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- main view
 
-    def draw_main_view(self) -> None:
-        size = get_terminal_size()
-        width = size.width
 
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        if self.client.docker_host:
-            parsed = self.client.parse_docker_host()
-            host_display = parsed["display"] if parsed else self.client.docker_host
-            context_text = (
-                f" [{self.current_context} ({host_display})]"
-                if self.current_context
-                else f" [{host_display}]"
-            )
-        else:
-            context_text = f" [{self.current_context}]" if self.current_context else ""
-        title_text = f"DockTUI Container Dashboard{context_text}"
-        draw_frame(title_text, width)
 
-        if not self.client.is_docker_installed():
-            print(f"\n{RED}{BOLD}Error: Docker CLI not found.{RESET}")
-            print("Please make sure Docker is installed and in your system PATH.")
-            print("\nPress 'q' to quit.")
-            return
 
-        if not self.is_daemon_running_cached():
-            print(f"\n{YELLOW}{BOLD}Warning: Cannot connect to the Docker daemon.{RESET}")
-            print("Please make sure Docker Desktop or the docker service is running.")
-            print("\nPress 'q' to quit, or 'r' to retry connection.")
-            return
 
-        if self.refresh_error:
-            age = (
-                f"{max(0, time.time() - self.last_refresh):.0f}s old"
-                if self.last_refresh
-                else "unavailable"
-            )
-            print(truncate(f"STALE ({age}): {self.refresh_error}", width))
-        self._draw_tab_header(width)
-        self._list_clipped = None
-        if self.current_tab == "containers":
-            self._draw_containers_tab(width)
-        elif self.current_tab == "compose":
-            self._draw_compose_tab(width)
-        elif self.current_tab == "images":
-            self._draw_images_tab(width)
-        elif self.current_tab == "volumes":
-            self._draw_volumes_tab(width)
-        elif self.current_tab == "networks":
-            self._draw_networks_tab(width)
-        elif self.current_tab == "contexts":
-            self._draw_contexts_tab(width)
 
-        status = self.status_message
-        if self._list_clipped:
-            start, end, total = self._list_clipped
-            status = f"{status}  [rows {start + 1}-{end} of {total}]"
-        pinned = self._pinned_label()
-        if pinned:
-            status = f"{status}  [pinned: {pinned}, Shift+P to unpin]"
-        draw_status_bar(status, width)
-        self._draw_main_footer()
 
-    def _draw_tab_header(self, width: int) -> None:
-        tab_labels = {
-            "containers": "Containers",
-            "compose": "Compose",
-            "images": "Images",
-            "volumes": "Volumes",
-            "networks": "Networks",
-            "contexts": "Contexts",
-        }
-        header_parts: list[str] = []
-        for idx, tab in enumerate(self.tabs, start=1):
-            label = f"{tab_labels[tab]} ({idx})"
-            header_parts.append(
-                f"{WHITE_ON_BLUE} {label} {RESET}" if tab == self.current_tab else f"[{label}]"
-            )
-        filter_bits: list[str] = []
-        active_filter = self.filters.get(self.current_tab, "")
-        if active_filter:
-            filter_bits.append(f"filter: {active_filter}")
-        if self.current_tab in ("containers", "compose"):
-            if self.state_filter != StateFilter.ALL.value:
-                filter_bits.append(f"state: {self.state_filter}")
-            if self.sort_mode != "default":
-                filter_bits.append(f"sort: {self.sort_mode}")
-        filter_status = "    [" + " | ".join(filter_bits) + "]" if filter_bits else ""
-        print("   ".join(header_parts) + filter_status)
-        print("─" * (width - 1))
 
-    def _list_window(self, total: int, selected: int, reserved: int) -> tuple[int, int]:
-        """Visible slice of a dashboard list; `reserved` is the non-list chrome height."""
-        height = get_terminal_size().height
-        if self.pinned_view is not None:
-            height -= self.split_viewport_height(height) + 7
-        start, end = list_window(total, selected, max(3, height - reserved))
-        self._list_clipped = (start, end, total) if (start, end) != (0, total) else None
-        return start, end
 
-    @staticmethod
-    def _state_cell(state: str, row_style: str = "") -> str:
-        """A 10-wide container state cell, coloured unless the row is highlighted."""
-        padded = f"{state:<10}"
-        if row_style:
-            return padded
-        if state == "running":
-            color = GREEN
-        elif state in ("exited", "dead"):
-            color = RED
-        else:
-            color = YELLOW
-        return f"{color}{padded}{RESET}"
 
-    def _draw_containers_tab(self, width: int) -> None:
-        if not self.containers:
-            if self.container_filter:
-                print(
-                    f"\n{CYAN}No containers match the active filter: '{self.container_filter}'{RESET}"
-                )
-                print("Press [C] to clear the filter.")
-            else:
-                self.draw_empty_state("containers", width)
-            return
-        rem = width - 26
-        name_w = max(15, int(rem * 0.30))
-        image_w = max(15, int(rem * 0.30))
-        status_w = max(15, rem - name_w - image_w)
 
-        header_line = f"{BOLD}{'ID':<12} {truncate('NAME', name_w)} {truncate('IMAGE', image_w)} {'STATE':<10} {truncate('STATUS', status_w)}{RESET}"
-        print(header_line)
-        print("─" * (width - 1))
-        start, end = self._list_window(len(self.containers), self.selected_index, reserved=19)
-        for idx, c in list(enumerate(self.containers))[start:end]:
-            style = WHITE_ON_BLUE if idx == self.selected_index else ""
-            state = c["state"]
-            padded_state = f"{state:<10}"
-            state_formatted = self._state_cell(state)
-            status_cell = truncate(c["status"], status_w)
-            if "(unhealthy)" in c["status"] or state == "restarting":
-                status_cell = f"{RED}{status_cell}{RESET}"
-            if idx == self.selected_index:
-                state_formatted = padded_state
-                status_cell = truncate(c["status"], status_w)
-                name_str = f"» {c['name']}"
-            else:
-                name_str = f"  {c['name']}"
-            line = f"{style}{c['id'][:10]:<12} {truncate(name_str, name_w)} {truncate(c['image'], image_w)} {state_formatted} {status_cell}{RESET}"
-            print(line)
-        print("─" * (width - 1))
 
-        sel = self.containers[self.selected_index]
-        c_id = sel["id"]
-        print(f"\n{CYAN}{BOLD}CONTAINER RESOURCE USAGE:{RESET}")
-        c_stats = self.stats.get(c_id) or self.stats.get(sel["name"])
-        if c_stats and sel["state"] == "running":
-            cpu_bar, cpu_high = self._percentage_bar(c_stats["cpu"], width=int(width * 0.2))
-            mem_bar, mem_high = self._percentage_bar(c_stats["mem_perc"], width=int(width * 0.2))
-            cpu_color = RED if cpu_high else GREEN
-            mem_color = RED if mem_high else GREEN
-            cpu_alert = f" {RED}{BOLD}[HIGH CPU]{RESET}" if cpu_high else ""
-            mem_alert = f" {RED}{BOLD}[HIGH MEMORY]{RESET}" if mem_high else ""
-            print(f"  CPU:  {cpu_color}{cpu_bar}{RESET}{cpu_alert}")
-            print(f"  MEM:  {mem_color}{mem_bar} ({c_stats['memory']}){RESET}{mem_alert}")
-            print(f"  NET:  {GREEN}{c_stats['net']}{RESET}")
-        else:
-            status_text = (
-                "N/A (container stopped)" if sel["state"] != "running" else "Loading stats..."
-            )
-            print(f"  Usage statistics: {YELLOW}{status_text}{RESET}")
-
-    def _draw_compose_tab(self, width: int) -> None:
-        if not self.compose_rows:
-            self.draw_empty_state("compose", width)
-            return
-        service_w = max(18, int(width * 0.25))
-        name_w = max(18, int(width * 0.25))
-        image_w = max(20, int(width * 0.25))
-        print(
-            f"{BOLD}{truncate('PROJECT / SERVICE', service_w)} {truncate('CONTAINER', name_w)} {'STATE':<10} {truncate('IMAGE', image_w)}{RESET}"
-        )
-        print("─" * (width - 1))
-        start, end = self._list_window(
-            len(self.compose_rows), self.selected_compose_index, reserved=13
-        )
-        for idx, row in list(enumerate(self.compose_rows))[start:end]:
-            style = WHITE_ON_BLUE if idx == self.selected_compose_index else ""
-            if row["type"] == "project":
-                project = str(row["project"])
-                count = len(row["containers"])  # type: ignore[arg-type]
-                print(
-                    f"{style}{BOLD}{truncate(project + '  (' + str(count) + ')', service_w)} {truncate('', name_w)} {'':<10} {truncate('', image_w)}{RESET}"
-                )
-            else:
-                container = row["container"]  # type: ignore[assignment]
-                service = container.get("compose_service") or "(standalone)"
-                state = container.get("state", "")
-                marker = "» " if idx == self.selected_compose_index else "  "
-                print(
-                    f"{style}{truncate(marker + service, service_w)} "
-                    f"{truncate(container.get('name', ''), name_w)} "
-                    f"{self._state_cell(state, style)} "
-                    f"{truncate(container.get('image', ''), image_w)}{RESET}"
-                )
-
-    def _draw_images_tab(self, width: int) -> None:
-        if not self.images:
-            active_filter = self.filters.get("images")
-            if active_filter:
-                print(f"\n{CYAN}No images match the active filter: '{active_filter}'{RESET}")
-                print("Press [C] to clear the filter.")
-            else:
-                self.draw_empty_state("images", width)
-            return
-        rem = width - 26
-        repo_w = max(20, int(rem * 0.45))
-        tag_w = max(12, int(rem * 0.25))
-        size_w = max(10, rem - repo_w - tag_w)
-        header_line = f"{BOLD}{'IMAGE ID':<12} {truncate('REPOSITORY', repo_w)} {truncate('TAG', tag_w)} {truncate('SIZE', size_w)}{RESET}"
-        print(header_line)
-        print("─" * (width - 1))
-        start, end = self._list_window(len(self.images), self.selected_image_index, reserved=13)
-        for idx, img in list(enumerate(self.images))[start:end]:
-            style = WHITE_ON_BLUE if idx == self.selected_image_index else ""
-            repo_str = (
-                f"» {img['repository']}"
-                if idx == self.selected_image_index
-                else f"  {img['repository']}"
-            )
-            line = f"{style}{img['id'][:10]:<12} {truncate(repo_str, repo_w)} {truncate(img['tag'], tag_w)} {truncate(img['size'], size_w)}{RESET}"
-            print(line)
-        print("─" * (width - 1))
-
-    def _draw_volumes_tab(self, width: int) -> None:
-        if not self.volumes:
-            active_filter = self.filters.get("volumes")
-            if active_filter:
-                print(f"\n{CYAN}No volumes match the active filter: '{active_filter}'{RESET}")
-                print("Press [C] to clear the filter.")
-            else:
-                self.draw_empty_state("volumes", width)
-            return
-        name_w = max(30, int(width * 0.50))
-        driver_w = max(12, int(width * 0.20))
-        print(
-            f"{BOLD}{truncate('VOLUME', name_w)} {truncate('DRIVER', driver_w)} {'SCOPE':<12}{RESET}"
-        )
-        print("─" * (width - 1))
-        start, end = self._list_window(len(self.volumes), self.selected_volume_index, reserved=13)
-        for idx, volume in list(enumerate(self.volumes))[start:end]:
-            style = WHITE_ON_BLUE if idx == self.selected_volume_index else ""
-            marker = "» " if idx == self.selected_volume_index else "  "
-            print(
-                f"{style}{truncate(marker + volume['name'], name_w)} {truncate(volume['driver'], driver_w)} {volume['scope']:<12}{RESET}"
-            )
-        print("─" * (width - 1))
-
-    def _draw_networks_tab(self, width: int) -> None:
-        if not self.networks:
-            active_filter = self.filters.get("networks")
-            if active_filter:
-                print(f"\n{CYAN}No networks match the active filter: '{active_filter}'{RESET}")
-                print("Press [C] to clear the filter.")
-            else:
-                self.draw_empty_state("networks", width)
-            return
-        name_w = max(30, int(width * 0.45))
-        driver_w = max(12, int(width * 0.20))
-        print(
-            f"{BOLD}{'ID':<12} {truncate('NETWORK', name_w)} {truncate('DRIVER', driver_w)} {'SCOPE':<12}{RESET}"
-        )
-        print("─" * (width - 1))
-        start, end = self._list_window(len(self.networks), self.selected_network_index, reserved=13)
-        for idx, network in list(enumerate(self.networks))[start:end]:
-            style = WHITE_ON_BLUE if idx == self.selected_network_index else ""
-            marker = "» " if idx == self.selected_network_index else "  "
-            print(
-                f"{style}{network['id'][:10]:<12} {truncate(marker + network['name'], name_w)} {truncate(network['driver'], driver_w)} {network['scope']:<12}{RESET}"
-            )
-        print("─" * (width - 1))
-
-    def _draw_contexts_tab(self, width: int) -> None:
-        if self.client.docker_host:
-            print(
-                f"{YELLOW}{BOLD}Note: DOCKER_HOST is active. Context switching is bypassed (DOCKER_HOST overrides context).{RESET}"
-            )
-            print("─" * (width - 1))
-        if not self.contexts:
-            active_filter = self.filters.get("contexts")
-            if active_filter:
-                print(f"\n{CYAN}No contexts match the active filter: '{active_filter}'{RESET}")
-                print("Press [C] to clear the filter.")
-            else:
-                self.draw_empty_state("contexts", width)
-            return
-        name_w = max(20, int(width * 0.25))
-        desc_w = max(24, int(width * 0.30))
-        endpoint_w = max(24, width - name_w - desc_w - 14)
-        print(
-            f"{BOLD}{truncate('CONTEXT', name_w)} {'CUR':<5} {truncate('DESCRIPTION', desc_w)} {truncate('ENDPOINT', endpoint_w)}{RESET}"
-        )
-        print("─" * (width - 1))
-        start, end = self._list_window(len(self.contexts), self.selected_context_index, reserved=14)
-        for idx, context in list(enumerate(self.contexts))[start:end]:
-            style = WHITE_ON_BLUE if idx == self.selected_context_index else ""
-            marker = "» " if idx == self.selected_context_index else "  "
-            print(
-                f"{style}{truncate(marker + context['name'], name_w)} "
-                f"{context['current']:<5} {truncate(context['description'], desc_w)} "
-                f"{truncate(context['endpoint'], endpoint_w)}{RESET}"
-            )
-        print("─" * (width - 1))
-
-    def _main_footer_hints(self) -> str:
-        if self.current_tab == "compose":
-            row = self.compose_rows[self.selected_compose_index] if self.compose_rows else None
-            if row and row.get("type") == "project":
-                return "[U] Up | [D] Down | [B] Build | [R] Restart | [L] Project Logs | [Tab] Switch | [?] Help | [Q] Quit"
-            else:
-                return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "containers":
-            return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [Shift+C] Clone | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "images":
-            return "[D] Delete | [F] Search & Pull | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "volumes":
-            return "[D] Delete | [Shift+F] Browse Files | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "networks":
-            return (
-                "[D] Delete | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
-            )
-        elif self.current_tab == "contexts":
-            return "[U] Use | [N] New Endpoint | [Shift+S] Settings | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit"
-        else:
-            return "[Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
-
-    def _draw_main_footer(self) -> None:
-        width = get_terminal_size().width
-        for line in wrap_hints(self._main_footer_hints(), width - 1):
-            print(f"{CYAN}{line}{RESET}")
 
     # ------------------------------------------------------------- empty state
 
-    def draw_empty_state(self, tab_name: str, width: int) -> None:
-        box_w = min(60, width - 4)
-        padding = (width - box_w) // 2
-        margin = " " * padding
-        tips = {
-            "containers": [
-                "No containers found.",
-                "To run a new container, try:",
-                f"{YELLOW}docker run -d --name test-nginx -p 8080:80 nginx{RESET}",
-            ],
-            "compose": [
-                "No Docker Compose projects found.",
-                "To start a compose project, run in your project dir:",
-                f"{YELLOW}docker compose up -d{RESET}",
-            ],
-            "images": [
-                "No local images found.",
-                "To pull a new image, try:",
-                f"{YELLOW}docker pull alpine:latest{RESET}",
-            ],
-            "volumes": [
-                "No volumes found.",
-                "To create a volume, try:",
-                f"{YELLOW}docker volume create my-data{RESET}",
-            ],
-            "networks": [
-                "No networks found.",
-                "To create a network, try:",
-                f"{YELLOW}docker network create my-net{RESET}",
-            ],
-            "contexts": [
-                "No Docker contexts found.",
-                "To list contexts manually, run:",
-                f"{YELLOW}docker context ls{RESET}",
-            ],
-        }
-        content = tips.get(tab_name, ["Nothing to display."])
-        print("\n")
-        print(margin + f"{CYAN}┌" + "─" * (box_w - 2) + f"┐{RESET}")
-        for line in content:
-            from .styles import strip_ansi
-
-            visible_len = len(strip_ansi(line))
-            pad_r = max(0, box_w - 4 - visible_len)
-            print(margin + f"{CYAN}│{RESET}  {line}" + " " * pad_r + f" {CYAN}│{RESET}")
-        print(margin + f"{CYAN}└" + "─" * (box_w - 2) + f"┘{RESET}")
-        print("\n")
 
     # ------------------------------------------------------------- logs view
 
-    def draw_logs_view(self) -> None:
-        if self.active_project:
-            log_title = f"PROJECT LOGS: {self.active_project}"
-            target_id: Optional[str] = None
-        else:
-            sel = self.active_container or (
-                self.containers[self.selected_index] if self.containers else None
-            )
-            if not sel:
-                self.view_mode = ViewMode.MAIN
-                return
-            log_title = f"LOGS: {sel['name']}"
-            target_id = sel["id"]
-
-        size = get_terminal_size()
-        width, height = size.width, size.height
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        viewport_height = self.get_viewport_height(height)
-
-        if not self.log_lines:
-            self.load_log_lines(target_id, viewport_height, follow=self.log_follow)
-            if self.log_follow:
-                self.start_log_stream(target_id, self.active_project)
-        elif self.log_follow and not self.is_log_streaming():
-            self.start_log_stream(target_id, self.active_project)
-        elif not self.log_follow and self.is_log_streaming():
-            self.stop_log_stream()
-
-        filter_status = f" [FILTER: {self.log_filter}]" if self.log_filter else ""
-        search_status = f" [SEARCH: {self.log_search}]" if self.log_search else ""
-        error_status = " [ERRORS]" if self.log_errors_only else ""
-        limit_status = f" [LIMIT: {self.log_tail_limit} lines]"
-        follow_status = " [FOLLOW]" if self.log_follow else ""
-        title_text = f"{log_title}{filter_status}{search_status}{error_status}{limit_status}{follow_status} (Line {self.log_scroll_index + 1} of {len(self.log_lines)})"
-        draw_frame(title_text, width)
-
-        visible, start, end = slice_viewport(self.log_lines, self.log_scroll_index, viewport_height)
-        for line in visible:
-            print(colorize_log_line(line[: width - 1], self.log_highlight_regex))
-        pad_to_viewport(len(visible), viewport_height)
-        if getattr(self, "_split_screen_mode", False):
-            return  # pinned pane: the dashboard footer already shows the keys
-        print("\n" + "═" * (width - 1))
-        print(
-            f"{CYAN}[Up/Down] Scroll | [F] Follow | [Space] Pause | [/] Search | [N] Next | [E] Errors | [H] Highlights | [O] Export | [+/-] Limit | [Esc/L] Back{RESET}"
-        )
 
     # ------------------------------------------------------------- inspect / details / top
 
-    def _draw_scrollable_text_view(
-        self,
-        title: str,
-        lines: list[str],
-        scroll_index_attr: str,
-        back_keys: str,
-    ) -> None:
-        if not lines:
-            self.view_mode = ViewMode.MAIN
-            return
-        size = get_terminal_size()
-        width, height = size.width, size.height
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        scroll_index = getattr(self, scroll_index_attr)
-        title_text = f"{title} (Line {scroll_index + 1} of {len(lines)})"
-        draw_frame(title_text, width)
-        viewport_height = self.get_viewport_height(height)
-        visible, _, _ = slice_viewport(lines, scroll_index, viewport_height)
-        for line in visible:
-            print(line[: width - 1])
-        pad_to_viewport(len(visible), viewport_height)
-        print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[Up/Down] Scroll | [O] Export | [Esc/{back_keys}] Back{RESET}")
 
-    def draw_inspect_view(self) -> None:
-        if not self.containers:
-            self.view_mode = ViewMode.MAIN
-            return
-        self._draw_scrollable_text_view(
-            f"INSPECT: {(self.active_container or self.containers[self.selected_index])['name']}",
-            self.inspect_lines,
-            "inspect_scroll_index",
-            "I",
-        )
 
-    def draw_details_view(self) -> None:
-        self._draw_scrollable_text_view(
-            "CONTAINER DETAILS",
-            self.details_lines,
-            "details_scroll_index",
-            "V",
-        )
 
-    def draw_top_view(self) -> None:
-        self._draw_scrollable_text_view(
-            "CONTAINER PROCESSES",
-            self.top_lines,
-            "top_scroll_index",
-            "T",
-        )
 
-    def draw_compose_snippet_view(self) -> None:
-        sel = self.current_selected_container()
-        if not sel:
-            self.view_mode = ViewMode.MAIN
-            return
-        if not self.compose_snippet_lines:
-            self.compose_snippet_lines = ["Loading…"]
-            self._load_output("compose_snippet_lines", "generate_compose_snippet", sel["id"])
-            self.compose_snippet_scroll_index = 0
-        self._draw_scrollable_text_view(
-            f"GENERATE COMPOSE SNIPPET: {sel['name']}",
-            self.compose_snippet_lines,
-            "compose_snippet_scroll_index",
-            "X",
-        )
 
-    def draw_exec_view(self) -> None:
-        if not self.containers:
-            self.view_mode = ViewMode.MAIN
-            return
-        sel = self.active_container or self.containers[self.selected_index]
-        size = get_terminal_size()
-        width, height = size.width, size.height
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        title_text = f"EXEC OUT: {sel['name']} > {self.exec_command_text[:30]} (Line {self.exec_scroll_index + 1} of {len(self.exec_output_lines)})"
-        draw_frame(title_text, width)
-        viewport_height = self.get_viewport_height(height)
-        visible, _, _ = slice_viewport(
-            self.exec_output_lines, self.exec_scroll_index, viewport_height
-        )
-        for line in visible:
-            print(line[: width - 1])
-        pad_to_viewport(len(visible), viewport_height)
-        print("\n" + "═" * (width - 1))
-        print(
-            f"{CYAN}[Up/Down] Scroll | [R] Run command again | [E] Run different command | [Esc] Back{RESET}"
-        )
 
-    def draw_system_view(self) -> None:
-        size = get_terminal_size()
-        width = size.width
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        draw_frame("DOCKER SYSTEM DISK USAGE & CLEANUP", width)
-        if not self.system_info_text:
-            self.system_info_text = "Loading…"
-            self._docker_job("view:disk", "get_disk_usage", (), lambda value: setattr(self, "system_info_text", value))
-        print(self.system_info_text)
-        print(
-            f"\n{YELLOW}Preview:{RESET} Docker does not provide a dry-run for prune; review the disk usage above before confirming."
-        )
-        print("\n" + "═" * (width - 1))
-        print(
-            f"{CYAN}[X] System prune | [I] Image prune | [V] Volume prune | [A] System prune + volumes | [Esc/P] Back{RESET}"
-        )
 
-    def draw_input_view(self) -> None:
-        previous = self.previous_view_mode
-        self._dispatch_view(previous)
-        print(
-            f"\n{YELLOW}{BOLD}{self.input_dialog.prompt}{RESET}{self.input_dialog.buffer}",
-            end="",
-            flush=True,
-        )
-        if "type to search history" in self.input_dialog.prompt:
-            matches = [
-                cmd for cmd in self.exec_history if self.input_dialog.buffer.lower() in cmd.lower()
-            ]
-            if matches:
-                print(f"\n{CYAN}Matches: {', '.join(matches[:5])}{RESET}", end="", flush=True)
 
-    def draw_help_view(self) -> None:
-        size = get_terminal_size()
-        width = size.width
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        draw_frame("DockTUI Help", width)
-        print(f"{BOLD}Global{RESET}")
-        print("  Tab / 1-6    Switch tabs")
-        print("  Up / Down    Move selection or scroll / Mouse scroll support")
-        print("  G            Refresh current data")
-        print("  M            Cycle theme color presets (Dark, Light, High-Contrast)")
-        print("  Shift+S      Open the Settings editor")
-        print("  ?            Open or close this help screen")
-        print("  Q / Esc      Quit or return to the previous screen")
-        print(f"\n{BOLD}Containers / Compose{RESET}")
-        print("  S            Start or stop the selected container / project")
-        print("  R            Restart the selected container / project")
-        print("  L            Open container or project logs")
-        print("  I            Inspect container JSON")
-        print("  E            Execute a command (interactively or in background)")
-        print("  V            Open readable container details")
-        print("  T            View container processes (docker top)")
-        print("  X            Generate a docker-compose.yml snippet")
-        print("  C (Shift)    Clone the selected container")
-        print("  W            Edit live CPU / memory limits (docker update)")
-        print("  Shift+F      Browse volume files (on the Volumes tab)")
-        print("  Ctrl+S       Bulk start/stop every container matching the filter")
-        print("  Ctrl+<key>   Run a custom `hotkey_overlays` command from your config")
-        print("  Shift+P      Unpin the pinned logs/details pane")
-        print("  O / Y        Cycle sorting and state filters")
-        print("  / / C        Apply or clear the tab filter")
-        print("  U / D / B    Compose up / down / build on the Compose tab")
-        print("  U            Use the selected Docker context")
-        print("  N            Create a new endpoint on the Contexts tab")
-        print(f"\n{BOLD}Images and cleanup{RESET}")
-        print("  D            Delete the selected image / volume / network")
-        print("  F            Search & pull a Docker Hub image (on the Images tab)")
-        print("  P            Open Docker disk usage and prune view")
-        print("  X / I / V / A    Run system, image, volume, or full prune")
-        print(f"\n{BOLD}Logs{RESET}")
-        print("  F            Toggle follow mode")
-        print("  Space        Pause follow mode")
-        print("  N            Jump to next search match")
-        print("  E            Toggle error/warning-only lines")
-        print("  H            Toggle log highlighting / regex")
-        print("  + / -        Increase or decrease log tail limit")
-        print("  / / C        Apply or clear log filter")
-        print("  P            Pin logs (or details) under the dashboard")
-        print("  O            Export logs to a local file")
-        print("  G            Refresh logs now")
-        print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[? / Esc / Q] Return to previous screen{RESET}")
 
-    def draw_settings_view(self) -> None:
-        size = get_terminal_size()
-        width = size.width
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        draw_frame("DOCKTUI SETTINGS", width)
-        print(
-            f"{BOLD}Edit the active configuration. Press Enter to edit the highlighted entry.{RESET}"
-        )
-        print("─" * (width - 1))
-        if not self.settings_options:
-            self._build_settings_options()
-        for idx, option in enumerate(self.settings_options):
-            marker = "» " if idx == self.settings_index else "  "
-            style = WHITE_ON_BLUE if idx == self.settings_index else ""
-            label = option["label"]
-            value = option["display"]()
-            print(f"{style}{marker}{label:<28} {value}{RESET}")
-        print("─" * (width - 1))
-        print(f"\n{CYAN}[Up/Down] Move | [Enter] Edit | [S] Save & Apply | [Esc] Back{RESET}")
 
-    def draw_search_view(self) -> None:
-        """Show a simple registry search results picker."""
-        size = get_terminal_size()
-        width = size.width
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        draw_frame("REGISTRY SEARCH", width)
-        if not self.search_results:
-            print(f"{YELLOW}No search results. Use the dialog to enter a query.{RESET}")
-        else:
-            for idx, result in enumerate(self.search_results):
-                marker = "» " if idx == self.search_index else "  "
-                style = WHITE_ON_BLUE if idx == self.search_index else ""
-                print(
-                    f"{style}{marker}{result['name']:<40} {truncate(result.get('description', ''), width - 50)}{RESET}"
-                )
-        print("─" * (width - 1))
-        print(f"\n{CYAN}[Up/Down] Move | [Enter] Pull | [Esc] Back{RESET}")
 
-    def draw_pull_progress_view(self) -> None:
-        size = get_terminal_size()
-        width = size.width
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        title = f"PULLING: {self.pull_image_name}"
-        draw_frame(title, width)
-        visible, _, _ = slice_viewport(
-            self.pull_lines, self.pull_scroll_index, max(1, size.height - 6)
-        )
-        for line in visible:
-            print(line[: width - 1])
-        pad_to_viewport(len(visible), max(1, size.height - 6))
-        print("\n" + "═" * (width - 1))
-        print(f"{CYAN}[Esc] Cancel & back{RESET}")
 
-    def draw_files_view(self) -> None:
-        size = get_terminal_size()
-        width = size.width
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        title = f"VOLUME FILES: {self.file_volume_name}  [{self.file_path}]"
-        draw_frame(title, width)
-        if not self.file_entries:
-            print(f"{YELLOW}(empty volume or unreadable){RESET}")
-        else:
-            for idx, entry in enumerate(self.file_entries):
-                marker = "» " if idx == self.file_index else "  "
-                style = WHITE_ON_BLUE if idx == self.file_index else ""
-                kind = "DIR" if entry.get("mode", "").startswith("d") else "FILE"
-                print(f"{style}{marker}{kind:<5} {entry.get('name', '')}{RESET}")
-        print("─" * (width - 1))
-        print(
-            f"\n{CYAN}[Up/Down] Move | [Enter] Open directory | [Backspace] Up | [Esc] Back{RESET}"
-        )
 
     # ------------------------------------------------------------- settings
 
@@ -2184,16 +1308,6 @@ class ContainerDashboard:
     def disable_mouse_tracking(self) -> None:
         print("\033[?1000l", end="", flush=True)
 
-    def _percentage_bar(self, percentage_str: str, width: int = 15) -> tuple[str, bool]:
-        try:
-            val = float(percentage_str.replace("%", "").strip())
-            val = max(0.0, min(100.0, val))
-            filled_len = int(round(width * val / 100.0))
-            bar = "█" * filled_len + "░" * (width - filled_len)
-            is_high = val >= self.config.cpu_alert_threshold
-            return f"[{bar}] {percentage_str}", is_high
-        except Exception:
-            return f"[░░░░░░░░░░░░░░░] {percentage_str}", False
 
     # ------------------------------------------------------------- view dispatch
 
@@ -2980,7 +2094,6 @@ class ContainerDashboard:
     # ------------------------------------------------------------- main loop
 
     def run(self) -> None:
-        global RESIZE_REQUESTED
         self._quit_requested = False
         self._running = True
         init_terminal()
@@ -3028,8 +2141,8 @@ class ContainerDashboard:
                 )
                 if self.view_mode != ViewMode.LOGS and not log_pinned and self.is_log_streaming():
                     self.stop_log_stream()
-                if RESIZE_REQUESTED:
-                    RESIZE_REQUESTED = False
+                if _terminal.RESIZE_REQUESTED:
+                    _terminal.RESIZE_REQUESTED = False
                     self.request_refresh()
                     self.need_redraw = True
                 if self.status_message != "Use Tab to switch tabs. Up/Down to navigate." and (
