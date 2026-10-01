@@ -4,6 +4,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,7 @@ class DockerClient:
         self._host_override: Optional[str] = host
         self._environment: Optional[dict[str, str]] = None
         self.connection_generation = 0
+        self.cancel_event: Optional[threading.Event] = None
 
     # ------------------------------------------------------------------ host
 
@@ -67,10 +69,12 @@ class DockerClient:
             return self.command_env()
         return None
 
-    def snapshot(self) -> "DockerClient":
+    def snapshot(self, context: Optional[str] = None) -> "DockerClient":
         """Freeze connection selection for a sequence of Docker commands."""
         client = copy.copy(self)
         client._environment = self.command_env()
+        if context and not client._environment.get("DOCKER_HOST") and not client._environment.get("DOCKER_CONTEXT"):
+            client._environment["DOCKER_CONTEXT"] = context
         return client
 
     def parse_docker_host(self) -> Optional[dict[str, str]]:
@@ -154,6 +158,10 @@ class DockerClient:
         env = kwargs.pop("env", None) or self._env()
         if env is not None:
             kwargs["env"] = env
+        if self.cancel_event is not None:
+            from .jobs import run_cancellable
+
+            return run_cancellable(cmd, self.cancel_event, **kwargs)
         return subprocess.run(cmd, **kwargs)
 
     def _capture(

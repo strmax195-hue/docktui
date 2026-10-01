@@ -14,6 +14,7 @@ import signal
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Iterator
 from typing import Any, Callable, Optional
 
@@ -31,6 +32,7 @@ from .constants import (
 from .dialogs import DialogResult, apply_dialog_key
 from .docker_client import DockerClient
 from .enums import ComposeAction, StateFilter, ThemeName, ViewMode
+from .jobs import JobRunner
 from .keymap import Keymap, resolve_hotkey_overlay
 from .log_stream import LineStreamer, StreamResult
 from .screen import (
@@ -46,6 +48,7 @@ from .screen import (
     viewport_height_for,
     wrap_hints,
 )
+from .snapshot import DashboardSnapshot, collect_snapshot, sort_container_rows
 from .styles import (
     BOLD,
     CYAN,
@@ -425,6 +428,11 @@ class ContainerDashboard:
         self.pinned_project: Optional[str] = None
         self._list_clipped: Optional[tuple[int, int, int]] = None
         self._quit_requested = False
+        self._running = False
+        self.jobs = JobRunner()
+        self._ui_lines: deque = deque(maxlen=max(1, self.config.log_max))
+        self._ui_events: deque = deque(maxlen=100)
+        self._log_generation = 0
         self._viewport_h = 0
 
         # ---------------------------------------------------------------- keymap
@@ -482,6 +490,9 @@ class ContainerDashboard:
     # ------------------------------------------------------------- refresh worker
 
     def start_refresh_worker(self) -> None:
+        if self._running:
+            self.request_refresh()
+            return
         if self.refresh_thread and self.refresh_thread.is_alive():
             return
         self.stop_refresh.clear()
@@ -514,6 +525,8 @@ class ContainerDashboard:
                 pass
 
     def is_daemon_running_cached(self, force: bool = False) -> bool:
+        if self._running:
+            return self.daemon_running
         now = time.time()
         if force or now - self.last_daemon_check >= self.daemon_check_interval:
             self.daemon_running = self.client.is_daemon_running()
@@ -654,23 +667,7 @@ class ContainerDashboard:
         return None
 
     def sort_containers(self, containers: list[dict[str, str]]) -> list[dict[str, str]]:
-        if self.state_filter != StateFilter.ALL.value:
-            containers = [c for c in containers if c.get("state") == self.state_filter]
-        if self.container_filter:
-            needle = self.container_filter.lower()
-            containers = [
-                c
-                for c in containers
-                if needle in c.get("name", "").lower()
-                or needle in c.get("image", "").lower()
-                or needle in c.get("compose_project", "").lower()
-                or needle in c.get("compose_service", "").lower()
-            ]
-        if self.sort_mode == "name":
-            return sorted(containers, key=lambda c: c.get("name", ""))
-        if self.sort_mode == "image":
-            return sorted(containers, key=lambda c: c.get("image", ""))
-        return sorted(containers, key=lambda c: (c.get("state") != "running", c.get("name", "")))
+        return sort_container_rows(containers, self.container_filter, self.state_filter, self.sort_mode)
 
     def build_compose_rows(self) -> None:
         groups: dict[str, list[dict[str, str]]] = {}
@@ -721,12 +718,25 @@ class ContainerDashboard:
     def load_log_lines(
         self, container_id: Optional[str], viewport_height: int, follow: bool = False
     ) -> None:
+        if self._running:
+            method = "get_compose_project_logs" if container_id is None and self.active_project else "get_logs"
+            target = self.active_project if method == "get_compose_project_logs" else container_id
+            token = self._log_generation
+            def apply(raw):
+                if token == self._log_generation:
+                    self._apply_log_text(raw, viewport_height, follow)
+                    self.need_redraw = True
+            self._docker_job("view:logs", method, (target,), apply, tail=self.log_tail_limit)
+            return
         if container_id is None and self.active_project:
             raw_logs = self.client.get_compose_project_logs(
                 self.active_project, tail=self.log_tail_limit
             )
         else:
             raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit)  # type: ignore
+        self._apply_log_text(raw_logs, viewport_height, follow)
+
+    def _apply_log_text(self, raw_logs: str, viewport_height: int, follow: bool) -> None:
         log_lines = raw_logs.split("\n")
         if self.log_errors_only:
             log_lines = [line for line in log_lines if _log_is_error_line(line)]
@@ -760,7 +770,11 @@ class ContainerDashboard:
         else:
             cmd += ["logs", "-f", f"--tail={self.log_tail_limit}", container_id]  # type: ignore
 
-        streamer = LineStreamer(cmd, on_line=self._on_log_line, env=self.client.command_env())
+        token = self._log_generation
+        generation = self.client.connection_generation
+        def on_line(line):
+            self._post_ui(lambda: self._on_log_line(line) if token == self._log_generation else None, generation, line=True)
+        streamer = LineStreamer(cmd, on_line=on_line, env=self.client.command_env())
         error = streamer.start()
         if error is not None:
             self.set_status(error)
@@ -787,6 +801,7 @@ class ContainerDashboard:
         self.need_redraw = True
 
     def stop_log_stream(self) -> None:
+        self._log_generation += 1
         if self.log_streamer is not None:
             self.log_streamer.stop()
             self.log_streamer = None
@@ -809,8 +824,9 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- top / details / inspect
 
-    def build_details_lines(self, container_id: str) -> list[str]:
-        details = self.client.get_container_details(container_id)
+    def build_details_lines(self, container_id: str, details: Optional[dict] = None) -> list[str]:
+        if details is None:
+            details = self.client.get_container_details(container_id)
         if "error" in details:
             return details["error"].split("\n")
         lines: list[str] = [
@@ -886,8 +902,7 @@ class ContainerDashboard:
             self.record_exec_command(command)
             self.config.save()
             self.set_status(f"Running command: {command}...")
-            output = self.client.exec_command(container["id"], command)
-            self.exec_output_lines = output.split("\n")
+            self._load_output("exec_output_lines", "exec_command", container["id"], command)
             self.exec_scroll_index = 0
             self.view_mode = ViewMode.EXEC
 
@@ -895,113 +910,125 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- refresh data
 
+    def _post_ui(self, callback: Callable, generation: int, line: bool = False) -> None:
+        if not self._running:
+            if generation == self.client.connection_generation:
+                callback()
+            return
+        with self.data_lock:
+            (self._ui_lines if line else self._ui_events).append((generation, callback))
+
+    def _drain_ui(self) -> None:
+        with self.data_lock:
+            updates = list(self._ui_lines) + list(self._ui_events)
+            self._ui_lines.clear()
+            self._ui_events.clear()
+        for generation, callback in updates:
+            if generation == self.client.connection_generation:
+                callback()
+        self.jobs.drain(self.client.connection_generation)
+
+    def _snapshot_request(self) -> tuple[str, str, str, str]:
+        return (self.current_tab, self.filters.get(self.current_tab, ""), self.state_filter, self.sort_mode)
+
+    def _apply_snapshot(self, snapshot: DashboardSnapshot) -> None:
+        self.current_context = snapshot.context
+        if snapshot.tab in ("containers", "compose"):
+            selected = self.current_selected_container()
+            cid = selected.get("id") if selected else None
+            project = None
+            if self.compose_rows and self.selected_compose_index < len(self.compose_rows):
+                project = self.compose_rows[self.selected_compose_index].get("project")
+            self.containers, self.stats = snapshot.items, snapshot.stats
+            self.build_compose_rows()
+            self.selected_index = next((i for i, row in enumerate(self.containers) if row.get("id") == cid), min(self.selected_index, max(0, len(self.containers) - 1)))
+            self.selected_compose_index = next((i for i, row in enumerate(self.compose_rows) if (row.get("container") or {}).get("id") == cid and cid is not None or row.get("type") == "project" and row.get("project") == project and project is not None), 0)
+        else:
+            attrs = {"images": "selected_image_index", "volumes": "selected_volume_index", "networks": "selected_network_index", "contexts": "selected_context_index"}
+            attr = attrs[snapshot.tab]
+            old = getattr(self, snapshot.tab)
+            index = getattr(self, attr)
+            key = "id" if snapshot.tab in ("images", "networks") else "name"
+            selected = old[index].get(key) if old and index < len(old) else None
+            setattr(self, snapshot.tab, snapshot.items)
+            setattr(self, attr, next((i for i, row in enumerate(snapshot.items) if row.get(key) == selected), min(index, max(0, len(snapshot.items) - 1))))
+        self.daemon_running = True
+        self.last_daemon_check = time.time()
+        self.last_refresh = time.time()
+        self.refresh_error = ""
+        self.refresh_in_progress = False
+        self.need_redraw = True
+
+    def _refresh_failed(self, exc: Exception) -> None:
+        self.refresh_error = str(exc)
+        self.refresh_in_progress = False
+        self.set_status(f"Refresh failed; keeping last snapshot: {exc}")
+        self.need_redraw = True
+
+    def _schedule_refresh(self) -> None:
+        request = self._snapshot_request()
+        client = self.client.snapshot(context=self.current_context or None)
+        def work(cancel):
+            client.cancel_event = cancel
+            return collect_snapshot(client, *request)
+        def apply(snapshot):
+            if request == self._snapshot_request():
+                self._apply_snapshot(snapshot)
+            else:
+                self.refresh_in_progress = False
+                self.request_refresh()
+        if self.jobs.submit("refresh", self.client.connection_generation, work, apply, self._refresh_failed):
+            self.refresh_in_progress = True
+            self.last_attempt = time.time()
+
     def refresh_data(self) -> None:
+        if self._running:
+            self.request_refresh()
+            return
         self.refresh_in_progress = True
         self.last_attempt = time.time()
+        generation = self.client.connection_generation
         try:
-            self._refresh_data()
-            self.refresh_error = ""
+            snapshot = collect_snapshot(
+                self.client.snapshot(context=self.current_context or None), *self._snapshot_request()
+            )
+            if generation == self.client.connection_generation:
+                self._apply_snapshot(snapshot)
         except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
-            self.refresh_error = str(exc)
-            self.set_status(f"Refresh failed; keeping last snapshot: {exc}")
+            self._refresh_failed(exc)
         finally:
             self.refresh_in_progress = False
-            self.need_redraw = True
 
-    def _refresh_data(self) -> None:
-        generation = self.client.connection_generation
-        client = self.client.snapshot()
-        current_context = client.get_current_context()
-        if self.current_tab in ("containers", "compose"):
-            containers = self.sort_containers(client.list_containers())
-            stats = client.get_container_stats() if containers else {}
-            with self.data_lock:
-                if generation != self.client.connection_generation:
-                    return
-                self.current_context = current_context
-                self.containers = containers
-                self.stats = stats
-                self.build_compose_rows()
-                if self.containers:
-                    if self.selected_index >= len(self.containers):
-                        self.selected_index = max(0, len(self.containers) - 1)
-                else:
-                    self.selected_index = 0
-                    self.selected_compose_index = 0
-        elif self.current_tab == "images":
-            images = client.list_images()
-            filter_val = (self.filters.get("images") or "").lower()
-            if filter_val:
-                images = [
-                    img
-                    for img in images
-                    if filter_val in img["repository"].lower()
-                    or filter_val in img["tag"].lower()
-                    or filter_val in img["id"].lower()
-                ]
-            with self.data_lock:
-                if generation != self.client.connection_generation:
-                    return
-                self.current_context = current_context
-                self.images = images
-                if self.selected_image_index >= len(self.images):
-                    self.selected_image_index = max(0, len(self.images) - 1)
-        elif self.current_tab == "volumes":
-            volumes = client.list_volumes()
-            filter_val = (self.filters.get("volumes") or "").lower()
-            if filter_val:
-                volumes = [
-                    v
-                    for v in volumes
-                    if filter_val in v["name"].lower() or filter_val in v["driver"].lower()
-                ]
-            with self.data_lock:
-                if generation != self.client.connection_generation:
-                    return
-                self.current_context = current_context
-                self.volumes = volumes
-                if self.selected_volume_index >= len(self.volumes):
-                    self.selected_volume_index = max(0, len(self.volumes) - 1)
-        elif self.current_tab == "networks":
-            networks = client.list_networks()
-            filter_val = (self.filters.get("networks") or "").lower()
-            if filter_val:
-                networks = [
-                    n
-                    for n in networks
-                    if filter_val in n["name"].lower()
-                    or filter_val in n["driver"].lower()
-                    or filter_val in n["id"].lower()
-                ]
-            with self.data_lock:
-                if generation != self.client.connection_generation:
-                    return
-                self.current_context = current_context
-                self.networks = networks
-                if self.selected_network_index >= len(self.networks):
-                    self.selected_network_index = max(0, len(self.networks) - 1)
-        elif self.current_tab == "contexts":
-            contexts = client.list_contexts()
-            filter_val = (self.filters.get("contexts") or "").lower()
-            if filter_val:
-                contexts = [
-                    ctx
-                    for ctx in contexts
-                    if filter_val in ctx["name"].lower()
-                    or filter_val in ctx["endpoint"].lower()
-                    or filter_val in ctx["description"].lower()
-                ]
-            with self.data_lock:
-                if generation != self.client.connection_generation:
-                    return
-                self.current_context = current_context
-                self.contexts = contexts
-                if self.selected_context_index >= len(self.contexts):
-                    self.selected_context_index = max(0, len(self.contexts) - 1)
-        with self.data_lock:
-            self.last_refresh = time.time()
-            self.refresh_in_progress = False
-            self.need_redraw = True
+    def _docker_job(self, key: str, method: str, args: tuple, apply: Callable, **kwargs) -> None:
+        client = self.client.snapshot(context=self.current_context or None)
+        if not self._running:
+            apply(getattr(client, method)(*args, **kwargs))
+            return
+        def work(cancel):
+            client.cancel_event = cancel
+            return getattr(client, method)(*args, **kwargs)
+        if self.jobs.submit(key, self.client.connection_generation, work, apply, lambda exc: self.set_status(f"Operation failed: {exc}")):
+            self.set_status("Working… Esc cancels the operation.")
+        else:
+            self.set_status("This operation is already running.")
+
+    def _load_output(self, attr: str, method: str, *args, **kwargs) -> None:
+        target = self.active_container
+        def apply(value):
+            if target is self.active_container:
+                setattr(self, attr, value.split("\n") if isinstance(value, str) else value)
+                self.need_redraw = True
+        self._docker_job(f"view:{attr}", method, args, apply, **kwargs)
+
+    def _action(self, method: str, *args, **kwargs) -> None:
+        def apply(value):
+            if isinstance(value, tuple):
+                ok, message = value
+                self.set_status(message or ("Operation completed." if ok else "Operation failed."))
+            else:
+                self.set_status(str(value) if isinstance(value, str) else ("Operation completed." if value else "Operation failed."))
+            self.request_refresh()
+        self._docker_job("action", method, args, apply, **kwargs)
 
     # ------------------------------------------------------------- main view
 
@@ -1505,7 +1532,8 @@ class ContainerDashboard:
             self.view_mode = ViewMode.MAIN
             return
         if not self.compose_snippet_lines:
-            self.compose_snippet_lines = self.client.generate_compose_snippet(sel["id"]).split("\n")
+            self.compose_snippet_lines = ["Loading…"]
+            self._load_output("compose_snippet_lines", "generate_compose_snippet", sel["id"])
             self.compose_snippet_scroll_index = 0
         self._draw_scrollable_text_view(
             f"GENERATE COMPOSE SNIPPET: {sel['name']}",
@@ -1544,7 +1572,8 @@ class ContainerDashboard:
             clear_screen()
         draw_frame("DOCKER SYSTEM DISK USAGE & CLEANUP", width)
         if not self.system_info_text:
-            self.system_info_text = self.client.get_disk_usage()
+            self.system_info_text = "Loading…"
+            self._docker_job("view:disk", "get_disk_usage", (), lambda value: setattr(self, "system_info_text", value))
         print(self.system_info_text)
         print(
             f"\n{YELLOW}Preview:{RESET} Docker does not provide a dry-run for prune; review the disk usage above before confirming."
@@ -1839,8 +1868,7 @@ class ContainerDashboard:
         def submit(query: str) -> None:
             if not query:
                 return
-            results = self.client.search_images(query)
-            self.search_results = results
+            self._load_output("search_results", "search_images", query)
             self.search_index = 0
             self.view_mode = ViewMode.SEARCH
 
@@ -1871,10 +1899,11 @@ class ContainerDashboard:
                 self.set_status(f"Pull of {repo} failed (exit {result.returncode}).")
             self.need_redraw = True
 
+        generation = self.client.connection_generation
         streamer = LineStreamer(
             self.client.pull_image_args(repo),
-            on_line=on_line,
-            on_complete=on_complete,
+            on_line=lambda line: self._post_ui(lambda: on_line(line), generation, line=True),
+            on_complete=lambda result: self._post_ui(lambda: on_complete(result), generation),
             max_lines=self.config.log_max,
             env=self.client.command_env(),
         )
@@ -1905,12 +1934,13 @@ class ContainerDashboard:
         self.view_mode = ViewMode.FILES
 
     def _load_file_entries(self) -> None:
-        self.file_entries = self.client.list_volume_contents(
-            self.file_volume_name, path=self.file_path
-        )
-        # Filter the current-directory markers.
-        self.file_entries = [e for e in self.file_entries if e.get("name") not in (".", "..")]
-        self.file_index = 0
+        target = (self.file_volume_name, self.file_path)
+        def apply(entries):
+            if target == (self.file_volume_name, self.file_path):
+                self.file_entries = [e for e in entries if e.get("name") not in (".", "..")]
+                self.file_index = 0
+                self.need_redraw = True
+        self._docker_job("view:files", "list_volume_contents", (target[0],), apply, path=target[1])
 
     def _file_open(self) -> None:
         if not self.file_entries:
@@ -1932,11 +1962,15 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- resource limits
 
-    def start_resource_edit(self) -> None:
-        sel = self.current_selected_container()
+    def start_resource_edit(self, details: Optional[dict] = None, selected: Optional[dict] = None) -> None:
+        sel = selected or self.current_selected_container()
         if not sel:
             return
-        details = self.client.get_container_details(sel["id"])
+        if details is None:
+            if self._running:
+                self._docker_job("view:prepare", "get_container_details", (sel["id"],), lambda value: self.start_resource_edit(value, sel))
+                return
+            details = self.client.get_container_details(sel["id"])
         current_cpus = details.get("cpus") or ""
         current_mem = details.get("memory_mb") or ""
 
@@ -1959,10 +1993,9 @@ class ContainerDashboard:
                 except ValueError:
                     self.set_status(f"Invalid number: {v}")
                     return
-            success, msg = self.client.update_container_resources(
+            self._action("update_container_resources",
                 sel["id"], cpus=cpus, memory_bytes=memory
             )
-            self.set_status(msg if success else f"Update failed: {msg}")
 
         initial = f"cpus={current_cpus}\nmemory_mb={current_mem}"
         self.start_input(
@@ -1973,24 +2006,27 @@ class ContainerDashboard:
 
     # ------------------------------------------------------------- container clone
 
-    def start_container_clone(self) -> None:
-        sel = self.current_selected_container()
+    def start_container_clone(self, details: Optional[dict] = None, selected: Optional[dict] = None) -> None:
+        sel = selected or self.current_selected_container()
         if not sel:
             return
-        details = self.client.get_container_details(sel["id"])
+        if details is None:
+            if self._running:
+                self._docker_job("view:prepare", "get_container_details", (sel["id"],), lambda value: self.start_container_clone(value, sel))
+                return
+            details = self.client.get_container_details(sel["id"])
 
         def submit(value: str) -> None:
             new_name = value.strip() or f"{sel['name']}-copy"
             ports = details.get("ports", "")
             port_bindings = [line.split(" -> ")[0] for line in ports.splitlines() if "->" in line]
-            success, msg = self.client.clone_container(
+            self._action("clone_container",
                 source_id=sel["id"],
                 new_name=new_name,
                 image=details.get("image", ""),
                 port_bindings=port_bindings or None,
             )
-            self.set_status(msg if success else f"Clone failed: {msg}")
-            self.refresh_data()
+
 
         self.start_input(
             f"New name for clone of {sel['name']}: ", submit, initial=f"{sel['name']}-copy"
@@ -2023,9 +2059,7 @@ class ContainerDashboard:
         if self.current_tab == "contexts" and self.contexts:
             sel_ctx = self.contexts[self.selected_context_index]
             self.set_status(f"Switching Docker context to {sel_ctx['name']}...")
-            success, msg = self.client.use_context(sel_ctx["name"])
-            self.set_status(msg)
-            self.refresh_data()
+            self._action("use_context", sel_ctx["name"])
             return
         if self.endpoints:
             entry = (
@@ -2040,6 +2074,8 @@ class ContainerDashboard:
         if not host:
             self.set_status("Endpoint has no host.")
             return
+        self.jobs.cancel_all()
+        self.refresh_in_progress = False
         self.stop_log_stream()
         if self.pull_streamer is not None:
             self.pull_streamer.stop()
@@ -2138,11 +2174,7 @@ class ContainerDashboard:
         config_file = row.get("config_file", "")
         if action == ComposeAction.UP.value and not self.compose_rows:
             return
-        success, msg = self.client.run_compose_cmd(
-            project, config_file, action, working_dir=row.get("working_dir") or None
-        )
-        self.set_status(msg if success else f"Compose {action} failed: {msg}")
-        self.refresh_data()
+        self._action("run_compose_cmd", project, config_file, action, working_dir=row.get("working_dir") or None)
 
     # ------------------------------------------------------------- mouse / drawing helpers
 
@@ -2258,12 +2290,12 @@ class ContainerDashboard:
             self.set_status(f"Bulk {action} canceled.")
             return
         self.set_status(f"Bulk {action}: {len(affected)} container(s)...")
-        ok, msg = self.client.bulk_container_action(action, [c["id"] for c in affected])
-        if ok:
-            self.set_status(f"Bulk {action} finished for {len(affected)} container(s).")
-        else:
-            self.set_status(f"Bulk {action} failed: {msg.splitlines()[0] if msg else 'error'}")
-        self.refresh_data()
+        ids = tuple(c["id"] for c in affected)
+        def apply(value):
+            ok, msg = value
+            self.set_status(f"Bulk {action} finished for {len(ids)} container(s)." if ok else f"Bulk {action} failed: {msg}")
+            self.request_refresh()
+        self._docker_job("action", "bulk_container_action", (action, list(ids)), apply)
 
     def _run_hotkey_overlay(self, key: str) -> bool:
         """Run a user-defined `hotkey_overlays` command in the selected container."""
@@ -2282,8 +2314,7 @@ class ContainerDashboard:
         self.active_container = sel
         self.exec_command_text = command
         self.set_status(f"Running hotkey command: {command}...")
-        output = self.client.exec_command(sel["id"], command)
-        self.exec_output_lines = output.split("\n")
+        self._load_output("exec_output_lines", "exec_command", sel["id"], command)
         self.exec_scroll_index = 0
         self.view_mode = ViewMode.EXEC
         return True
@@ -2569,8 +2600,7 @@ class ContainerDashboard:
             sel = self.active_container or self.current_selected_container()
             if sel:
                 self.set_status(f"Running command: {self.exec_command_text}...")
-                output = self.client.exec_command(sel["id"], self.exec_command_text)
-                self.exec_output_lines = output.split("\n")
+                self._load_output("exec_output_lines", "exec_command", sel["id"], self.exec_command_text)
                 self.exec_scroll_index = 0
             return True
         if key == "e":
@@ -2581,8 +2611,7 @@ class ContainerDashboard:
                     self.exec_command_text = command
                     self.record_exec_command(command)
                     self.set_status(f"Running command: {command}...")
-                    output = self.client.exec_command(sel["id"], command)
-                    self.exec_output_lines = output.split("\n")
+                    self._load_output("exec_output_lines", "exec_command", sel["id"], command)
                     self.exec_scroll_index = 0
             return True
         if key in ("q", "\x1b"):
@@ -2592,24 +2621,13 @@ class ContainerDashboard:
 
     def _handle_key_system(self, key: str) -> bool:
         if key in ("x", "i", "v", "a"):
-            prune_name = {"x": "PRUNE", "i": "IMAGES", "v": "VOLUMES", "a": "ALL"}[key]
-            if self.prompt_user(f"Type {prune_name} to confirm prune: ") != prune_name:
+            word = {"x": "PRUNE", "i": "IMAGES", "v": "VOLUMES", "a": "ALL"}[key]
+            if self.prompt_user(f"Type {word} to confirm prune: ") != word:
                 self.set_status("Prune canceled.")
                 return True
-            self.set_status(f"Running Docker prune ({prune_name})...")
-            self.draw_system_view()
-            if key == "i":
-                out = self.client.prune_images()
-            elif key == "v":
-                out = self.client.prune_volumes()
-            else:
-                out = self.client.prune_system(include_volumes=(key == "a"))
-            print("\n" + "─" * 40)
-            print(out)
-            print("─" * 40)
-            self.prompt_user("Prune complete. Press ENTER to continue.")
+            method = {"i": "prune_images", "v": "prune_volumes"}.get(key, "prune_system")
             self.system_info_text = ""
-            self.refresh_data()
+            self._action(method, **({"include_volumes": key == "a"} if method == "prune_system" else {}))
             return True
         if key in ("p", "\x1b"):
             self.view_mode = ViewMode.MAIN
@@ -2759,9 +2777,7 @@ class ContainerDashboard:
         if not new_name:
             return
         self.set_status(f"Renaming container {sel['name']} to {new_name}...")
-        success, msg = self.client.rename_container(sel["id"], new_name)
-        self.set_status(msg if success else f"Rename failed: {msg}")
-        self.refresh_data()
+        self._action("rename_container", sel["id"], new_name)
 
     def _open_logs_view(self) -> None:
         if (
@@ -2795,7 +2811,12 @@ class ContainerDashboard:
             self.unpin_view()
         self.active_container = sel
         self.set_status(f"Loading details for {sel['name']}...")
-        self.details_lines = self.build_details_lines(sel["id"])
+        self.details_lines = ["Loading…"]
+        def apply(details):
+            if self.active_container is sel:
+                self.details_lines = self.build_details_lines(sel["id"], details)
+                self.need_redraw = True
+        self._docker_job("view:details", "get_container_details", (sel["id"],), apply)
         self.details_scroll_index = 0
         self.view_mode = ViewMode.DETAILS
 
@@ -2805,8 +2826,8 @@ class ContainerDashboard:
             return
         self.active_container = sel
         self.set_status(f"Inspecting container {sel['name']}...")
-        inspect_data = self.client.inspect_container(sel["id"])
-        self.inspect_lines = inspect_data.split("\n")
+        self.inspect_lines = ["Loading…"]
+        self._load_output("inspect_lines", "inspect_container", sel["id"])
         self.inspect_scroll_index = 0
         self.view_mode = ViewMode.INSPECT
 
@@ -2819,7 +2840,8 @@ class ContainerDashboard:
             return
         self.active_container = sel
         self.set_status(f"Loading processes for {sel['name']}...")
-        self.top_lines = self.client.top_container(sel["id"]).split("\n")
+        self.top_lines = ["Loading…"]
+        self._load_output("top_lines", "top_container", sel["id"])
         self.top_scroll_index = 0
         self.view_mode = ViewMode.TOP
 
@@ -2848,8 +2870,7 @@ class ContainerDashboard:
             self.run_interactive_exec(sel["id"], sel["name"], command)
         else:
             self.set_status(f"Running command: {command}...")
-            output = self.client.exec_command(sel["id"], command)
-            self.exec_output_lines = output.split("\n")
+            self._load_output("exec_output_lines", "exec_command", sel["id"], command)
             self.exec_scroll_index = 0
             self.view_mode = ViewMode.EXEC
 
@@ -2862,162 +2883,64 @@ class ContainerDashboard:
         self.view_mode = ViewMode.COMPOSE_SNIPPET
 
     def _restart_or_reconnect(self) -> None:
-        if not self.is_daemon_running_cached(force=True):
-            self.set_status("Reconnecting to Docker daemon...")
-            self.refresh_data()
+        if not self.daemon_running:
+            self.request_refresh()
             return
-        if not self.containers:
-            self.set_status("Connected to Docker daemon. Refreshing data...")
-            self.refresh_data()
-            return
-        if (
-            self.current_tab == "compose"
-            and self.compose_rows
-            and self.compose_rows[self.selected_compose_index].get("type") == "project"
-        ):
+        if self.current_tab == "compose" and self.compose_rows:
             row = self.compose_rows[self.selected_compose_index]
-            for container in row["containers"]:  # type: ignore[index]
-                self.client.restart_container(container["id"])
-            self.set_status(f"Restarted project {row['project']}.")
-            self.refresh_data()
-            return
+            if row.get("type") == "project":
+                self._action("bulk_container_action", "restart", [c["id"] for c in row["containers"]])
+                return
         sel = self.current_selected_container()
-        if not sel:
-            return
-        self.set_status(f"Restarting container: {sel['name']}...")
-        if self.client.restart_container(sel["id"]):
-            self.set_status(f"Successfully restarted container {sel['name']}.")
-        else:
-            self.set_status(f"Failed to restart container {sel['name']}.")
-        self.refresh_data()
+        if sel:
+            self._action("restart_container", sel["id"])
 
     def _start_or_stop_selected(self) -> None:
-        if (
-            self.current_tab == "compose"
-            and self.compose_rows
-            and self.compose_rows[self.selected_compose_index].get("type") == "project"
-        ):
+        if self.current_tab == "compose" and self.compose_rows:
             row = self.compose_rows[self.selected_compose_index]
-            containers = row["containers"]  # type: ignore[index]
-            any_running = any(c["state"] == "running" for c in containers)
-            for container in containers:
-                if any_running and container["state"] == "running":
-                    self.client.stop_container(container["id"])
-                elif not any_running:
-                    self.client.start_container(container["id"])
-            self.set_status(f"{'Stopped' if any_running else 'Started'} project {row['project']}.")
-            self.refresh_data()
-            return
+            if row.get("type") == "project":
+                containers = row["containers"]
+                running = any(c["state"] == "running" for c in containers)
+                self._action("bulk_container_action", "stop" if running else "start", [c["id"] for c in containers if not running or c["state"] == "running"])
+                return
         sel = self.current_selected_container()
-        if not sel:
-            return
-        if sel["state"] == "running":
-            self.set_status(f"Stopping container: {sel['name']}...")
-            ok = self.client.stop_container(sel["id"])
-            self.set_status(f"{'Stopped' if ok else 'Failed to stop'} container {sel['name']}.")
-        else:
-            self.set_status(f"Starting container: {sel['name']}...")
-            ok = self.client.start_container(sel["id"])
-            self.set_status(f"{'Started' if ok else 'Failed to start'} container {sel['name']}.")
-        self.refresh_data()
+        if sel:
+            self._action("stop_container" if sel["state"] == "running" else "start_container", sel["id"])
 
     def _delete_current(self) -> None:
-        if self.current_tab == "images" and self.images:
-            sel_img = self.images[self.selected_image_index]
-            if self.prompt_user(
-                f"Delete image {sel_img['repository']}:{sel_img['tag']}? (y/n): "
-            ).lower() in ("y", "yes"):
-                self.set_status(f"Deleting image {sel_img['id'][:10]}...")
-                success, msg = self.client.remove_image(sel_img["id"])
-                if not success:
-                    print("\n" + "─" * 40)
-                    print(f"{RED}Error: {msg}{RESET}")
-                    print("─" * 40)
-                    self.prompt_user("Press ENTER to continue.")
-                else:
-                    self.set_status("Successfully deleted image.")
-                self.refresh_data()
-        elif self.current_tab == "volumes" and self.volumes:
-            volume = self.volumes[self.selected_volume_index]
-            if self.prompt_user(f"Delete volume {volume['name']}? (y/n): ").lower() in ("y", "yes"):
-                success, msg = self.client.remove_volume(volume["name"])
-                self.set_status(msg if success else f"Volume delete failed: {msg}")
-                self.refresh_data()
-        elif self.current_tab == "networks" and self.networks:
-            network = self.networks[self.selected_network_index]
-            if self.prompt_user(
-                f"Delete network {network['name']} ({network['driver']})? (y/n): "
-            ).lower() in ("y", "yes"):
-                success, msg = self.client.remove_network(network["name"])
-                self.set_status(msg if success else f"Network delete failed: {msg}")
-                self.refresh_data()
+        resources = {"images": (self.images, self.selected_image_index, "id", "remove_image"), "volumes": (self.volumes, self.selected_volume_index, "name", "remove_volume"), "networks": (self.networks, self.selected_network_index, "name", "remove_network")}
+        entry = resources.get(self.current_tab)
+        if not entry:
+            return
+        items, index, field, method = entry
+        if not items:
+            return
+        target = items[index][field]
+        if self.prompt_user(f"Delete {self.current_tab[:-1]} {target}? (y/n): ").lower() in ("y", "yes"):
+            self._action(method, target)
 
     def _handle_compose_action_key(self, key: str) -> bool:
-        if (
-            not self.compose_rows
-            or self.compose_rows[self.selected_compose_index].get("type") != "project"
-        ):
+        if not self.compose_rows or self.compose_rows[self.selected_compose_index].get("type") != "project":
             return False
         row = self.compose_rows[self.selected_compose_index]
+        action = None
         if key == "u":
-            confirm = (
-                self.prompt_user(f"Run up with --build on project '{row['project']}'? (y/n/c): ")
-                .lower()
-                .strip()
-            )
-            if confirm in ("y", "yes"):
-                self.set_status(f"Starting compose project '{row['project']}' with --build...")
-                success, msg = self.client.run_compose_cmd(
-                    row["project"],
-                    row.get("config_file", ""),
-                    ComposeAction.UP_BUILD.value,
-                    working_dir=row.get("working_dir") or None,
-                )
-                self.set_status(msg if success else f"Compose up failed: {msg}")
-            elif confirm in ("n", "no"):
-                self.set_status(f"Starting compose project '{row['project']}'...")
-                success, msg = self.client.run_compose_cmd(
-                    row["project"],
-                    row.get("config_file", ""),
-                    ComposeAction.UP.value,
-                    working_dir=row.get("working_dir") or None,
-                )
-                self.set_status(msg if success else f"Compose up failed: {msg}")
-            else:
-                self.set_status("Compose up canceled.")
-            self.refresh_data()
-            return True
-        if key == "d":
-            if self.prompt_user(f"Down compose project '{row['project']}'? (y/n): ").lower() in (
-                "y",
-                "yes",
-            ):
-                self.set_status(f"Downing compose project '{row['project']}'...")
-                success, msg = self.client.run_compose_cmd(
-                    row["project"],
-                    row.get("config_file", ""),
-                    ComposeAction.DOWN.value,
-                    working_dir=row.get("working_dir") or None,
-                )
-                self.set_status(msg if success else f"Compose down failed: {msg}")
-                self.refresh_data()
-            return True
-        if key == "b":
-            if self.prompt_user(f"Build compose project '{row['project']}'? (y/n): ").lower() in (
-                "y",
-                "yes",
-            ):
-                self.set_status(f"Building compose project '{row['project']}'...")
-                success, msg = self.client.run_compose_cmd(
-                    row["project"],
-                    row.get("config_file", ""),
-                    ComposeAction.BUILD.value,
-                    working_dir=row.get("working_dir") or None,
-                )
-                self.set_status(msg if success else f"Compose build failed: {msg}")
-                self.refresh_data()
-            return True
-        return False
+            answer = self.prompt_user(f"Run up with --build on project '{row['project']}'? (y/n/c): ").lower()
+            if answer in ("y", "yes"):
+                action = ComposeAction.UP_BUILD.value
+            elif answer in ("n", "no"):
+                action = ComposeAction.UP.value
+        elif key in ("d", "b"):
+            action = ComposeAction.DOWN.value if key == "d" else ComposeAction.BUILD.value
+            if self.prompt_user(f"{action.title()} project '{row['project']}'? (y/n): ").lower() not in ("y", "yes"):
+                action = None
+        else:
+            return False
+        if action:
+            self._run_compose_action(action)
+        else:
+            self.set_status("Compose action canceled.")
+        return True
 
     # ------------------------------------------------------------- log search
 
@@ -3059,6 +2982,7 @@ class ContainerDashboard:
     def run(self) -> None:
         global RESIZE_REQUESTED
         self._quit_requested = False
+        self._running = True
         init_terminal()
         self.enable_mouse_tracking()
         self.start_refresh_worker()
@@ -3083,6 +3007,10 @@ class ContainerDashboard:
 
         try:
             while not self._quit_requested:
+                self._drain_ui()
+                if self.refresh_requested.is_set():
+                    self.refresh_requested.clear()
+                    self._schedule_refresh()
                 size = get_terminal_size()
                 self._viewport_h = viewport_height_for(size.height)
 
@@ -3115,6 +3043,11 @@ class ContainerDashboard:
                     time.sleep(0.04)
                     continue
                 self.need_redraw = True
+                if key == "\x1b" and self.jobs.busy:
+                    self.jobs.cancel_all()
+                    self.refresh_in_progress = False
+                    self.set_status("Operation canceled; Docker-side work may already have started.")
+                    continue
                 if self.view_mode == ViewMode.INPUT:
                     self.handle_input_key(key)
                     time.sleep(0.08)
@@ -3135,6 +3068,8 @@ class ContainerDashboard:
                     continue
                 time.sleep(0.04)
         finally:
+            self._running = False
+            self.jobs.shutdown()
             self.stop_log_stream()
             if self.pull_streamer is not None:
                 self.pull_streamer.stop()
