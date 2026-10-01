@@ -16,7 +16,8 @@
 
 ## Проверка
 
-Локально: `python -m unittest discover -s tests -q`. Docker и native Windows
+Локально: `python -m unittest discover -s tests -q` — 215 тестов, 211 passed,
+4 platform/integration skipped. Docker и native Windows
 проверяются отдельными CI сценариями. GitHub Actions выполняет pytest/coverage
 на Python 3.9/3.11/3.13/3.14 в Linux/macOS/Windows, ruff, mypy, реальный Compose
 lifecycle с конечным/пустым log window, сборку/Twine и установку wheel в чистую
@@ -29,6 +30,11 @@ venv вне checkout. Измеренный baseline: 53.29% combined, 42.23% bra
 Compose until, stream startup completion и pin/follow для конечного окна.
 Дополнительно проверены 100/1000 контейнеров при процессе с задержкой 10 с,
 ошибки сохранения в CLI/TUI, удаление контейнера в events и сигнал Ctrl+C.
+
+Сборка wheel/sdist, Twine и clean-venv smoke проверены в
+[Release CI](https://github.com/strmax195-hue/docktui/actions/runs/36817966811).
+Изменённые файлы локального checkout сверены с GitHub blob SHA: расхождений нет.
+Итоговые проверки доступны в разделе Checks PR #26.
 
 ## Принятые решения и ограничения
 
