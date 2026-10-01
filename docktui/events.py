@@ -10,6 +10,7 @@ class EventFeed:
         self.rows: deque[dict] = deque(maxlen=max(1, max_events))
         self.cursor = 0
         self.status = "connecting"
+        self.deleted = False
 
     @property
     def since(self) -> Optional[str]:
@@ -31,7 +32,8 @@ class EventFeed:
         row["_key"] = key
         self.rows.append(row)
         self.cursor = max(self.cursor, stamp)
-        self.status = "connected"
+        self.deleted = key[2] == "destroy"
+        self.status = "container removed" if self.deleted else "connected"
         return True
 
     def disconnect(self, returncode: int) -> None:

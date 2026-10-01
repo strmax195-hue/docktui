@@ -39,3 +39,10 @@ class TestContainerDiagnostics(unittest.TestCase):
         feed.disconnect(1)
         self.assertIn("disconnected", feed.status)
         self.assertFalse(feed.append("bad json"))
+
+    def test_destroy_event_marks_removed_container(self):
+        from docktui.events import EventFeed
+        feed = EventFeed()
+        self.assertTrue(feed.append(json.dumps({'timeNano':1,'Action':'destroy','Actor':{'ID':'a'}})))
+        self.assertTrue(feed.deleted)
+        self.assertIn('removed', feed.status)

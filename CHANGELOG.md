@@ -27,6 +27,7 @@ A release focused on people who run Docker hosts: scriptable health checks, diag
 - `py.typed` marker, `Typing :: Typed` and sysadmin classifiers; CI integration job against a real Docker daemon; CLI smoke tests; release workflow attaches the wheel and sdist to the GitHub release and checks the tag matches the package version.
 
 ### Fixed
+- Ctrl+C requests orderly UI shutdown without interrupting thread creation or lock operations; terminal signal handlers restore afterward.
 - Successful context switches pin the new connection and invalidate old jobs/streams. Superseded view reads are canceled so quick navigation loads the latest target. Preserve configured global highlights; retain full freshness timestamp precision. Complete failed stream startup exactly once and reconnect events; finite log windows remain paused when pinned. Compose finite windows collect per-container logs using supported Docker flags. Windows subprocess trees use kill-on-close Job Objects with bounded cleanup and a taskkill fallback.
 - Release publication now consumes one artifact after tests, lint, type checks, Twine, tag/version validation and clean wheel installation. PyPI is opt-in after Trusted Publishing setup; Actions use pinned SHAs.
 - Configuration saves use an fsynced temporary file and atomic replacement. Nonfinite numbers, invalid endpoint structures, duplicate names, inconsistent log limits and malformed regexes are diagnosed by doctor. Runtime sanitizes unsafe values; unresolved active endpoints still fail explicitly to prevent a wrong-host fallback.

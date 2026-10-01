@@ -643,11 +643,16 @@ class DockerClient:
         if not self.is_docker_installed():
             return "Docker not installed."
         if options.get("until"):
-            rows = [row for row in self.list_containers() if row.get("compose_project") == project_name]
-            output = []
+            rows = [
+                row for row in self.list_containers() if row.get("compose_project") == project_name
+            ]
+            output: list[str] = []
             for row in rows:
                 prefix = row.get("compose_service") or row.get("name") or row["id"]
-                output.extend(f"{prefix} | {line}" for line in self.get_logs(row["id"], tail=tail, **options).splitlines())
+                output.extend(
+                    f"{prefix} | {line}"
+                    for line in self.get_logs(row["id"], tail=tail, **options).splitlines()
+                )
             return "\n".join(output)
         return self._capture(
             self.logs_command(None, project_name, tail=tail, **options),
