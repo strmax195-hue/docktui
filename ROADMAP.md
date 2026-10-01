@@ -59,7 +59,7 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - [x] Apply the selected connection to every subprocess.
 - [x] Correct Compose argument ordering and validate config paths.
 - [x] Bound streaming buffers and reliably finish background processes.
-- [ ] Keep TUI navigation responsive during slow operations.
+- [x] Keep TUI navigation responsive during slow operations.
 - [ ] Split terminal I/O and view rendering from the dashboard coordinator.
 - [ ] Save and validate configuration safely; strengthen CI.
 - [ ] Publish one tested package artifact through a single release pipeline.

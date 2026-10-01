@@ -254,6 +254,7 @@ docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCK
 - **`Shift+S`**: Open the in-app Settings editor.
 - **`?`**: Open the in-app keyboard help screen.
 - **`Q`**: Exit DockTUI.
+- **`Esc` while work is pending**: Cancel background operations first. Cancellation stops the local command; Docker-side work may already have started. A second press follows the current view's normal Back/Exit behavior.
 
 ### Containers & Compose Tabs
 - **`Ctrl+S`**: Bulk start or stop every container matching the active filter/state (asks for confirmation, runs as one `docker stop`/`docker start`).
@@ -362,6 +363,7 @@ DockTUI wraps the `docker` CLI via `subprocess`, so your existing configuration,
 | `doctor.py` | Environment diagnostics |
 | `docker_client.py` | `docker` subprocess wrapper, `DOCKER_HOST` parsing, per-instance host override |
 | `config.py` | `Config` dataclass: lookup paths, load/validate/save |
+| `jobs.py` / `snapshot.py` | Background work, cancellation, UI result delivery and resource snapshots |
 | `tui.py` | Dashboard orchestrator: one `draw_*` method per view, key-handler table |
 | `log_stream.py` | Background `LineStreamer` for log follow and image pulls |
 | `screen.py` / `styles.py` / `keymap.py` / `dialogs.py` | Layout helpers, themes, key bindings, input dialogs |
