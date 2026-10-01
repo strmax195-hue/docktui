@@ -32,7 +32,7 @@ Compose until, stream startup completion и pin/follow для конечного
 ошибки сохранения в CLI/TUI, удаление контейнера в events и сигнал Ctrl+C.
 
 Сборка wheel/sdist, Twine и clean-venv smoke проверены в
-[Release CI](https://github.com/strmax195-hue/docktui/actions/runs/36817966811).
+[Release CI](https://github.com/strmax195-hue/docktui/actions/runs/36820300121).
 Изменённые файлы локального checkout сверены с GitHub blob SHA: расхождений нет.
 Итоговые проверки доступны в разделе Checks PR #26.
 
@@ -44,13 +44,14 @@ Compose until, stream startup completion и pin/follow для конечного
 - Синхронные прямые методы dashboard сохранены для embeddings; работающий TUI использует jobs. Прямой вызов метода может блокировать вызывающий код.
 - Renderers вынесены одним механическим изменением, с сохранением API и тем. Риск — более крупный diff для ревью.
 - Некорректный active_endpoint остаётся явной ошибкой: fallback на другой Docker host запрещён. Пользователь исправляет настройку.
-- PyPI ownership/name/Trusted Publisher не проверены через доступные инструменты: публикация выключена до настройки владельцем. Последний выпущенный wheel остаётся v1.4.0; source target — 1.5.0. Homebrew отложен до стабильного PyPI выпуска.
+- PyPI ownership/name/Trusted Publisher не проверены через доступные инструменты: публикация в PyPI выключена до настройки владельцем. Wheel и sdist v1.5.0 опубликованы в GitHub Releases. Homebrew отложен до стабильного PyPI выпуска.
 - Events встроены в Details: до ленты нужно прокрутить диагностические поля.
 - Конечный Until отключает follow, включая pinned pane; для follow нужно очистить Until. Compose окна собираются через поддерживаемый docker logs каждого контейнера.
 - Промежуточные PR заменяются одним итоговым PR; история коммитов и закрытых PR сохраняется. Итоговый diff крупнее, но слияние не требует цепочки зависимых веток.
 - Native Windows и Docker проверяются CI; реальная SSH-инфраструктура и PyPI account setup остаются внешними. Специфические удалённые подключения требуют проверки в окружении владельца.
 
 Отложенных мелких замечаний независимого ревью нет. PR #26 влит в `main`
-с сохранением линейной истории. Changelog датирован 2026-10-01 как дата
-доступности исходников 1.5.0. Release tag и публикация пакета не выполнялись;
-последний опубликованный GitHub Release — v1.4.0.
+с сохранением линейной истории. [GitHub Release v1.5.0](https://github.com/strmax195-hue/docktui/releases/tag/v1.5.0)
+опубликован 2026-10-01 из commit `e4fe2b8384ee53d550d3cf0d003f11100d94dd6a`.
+Release workflow проверил и приложил wheel и sdist; changelog и README
+обновлены под опубликованный релиз. Публикация в PyPI не выполнялась.
