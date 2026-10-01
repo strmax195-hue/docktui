@@ -574,7 +574,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             )
         else:
             raw_logs = self.client.get_logs(
-                container_id, tail=self.log_tail_limit, **self._log_options()
+                container_id or "", tail=self.log_tail_limit, **self._log_options()
             )  # type: ignore
         self._apply_log_text(raw_logs, viewport_height, follow)
 
@@ -740,7 +740,6 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.active_container = container
             self.exec_command_text = command
             self.record_exec_command(command)
-            self.config.save()
             self.set_status(f"Running command: {command}...")
             self._load_output("exec_output_lines", "exec_command", container["id"], command)
             self.exec_scroll_index = 0
@@ -1057,8 +1056,8 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                                 }
                             )
                         self.config.save()
-            except ValueError as e:
-                self.set_status(f"Invalid value: {e}")
+            except (ValueError, OSError) as e:
+                self.set_status(f"Update/save failed: {e}")
                 return
             self.config.validate()
             self._apply_runtime_config()
@@ -1282,8 +1281,8 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.set_status(f"Added endpoint {name} -> {host}.")
             try:
                 self.config.save()
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                self.set_status(f"Endpoint added for this session; save failed: {exc}")
 
         self.start_input("New endpoint: name|host|description (description optional): ", submit)
 

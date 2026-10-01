@@ -350,7 +350,11 @@ def cmd_config(args: argparse.Namespace, config: Config) -> int:
         if target.exists() and not args.force:
             print(f"docktui: {target} already exists (use --force to overwrite).", file=sys.stderr)
             return 1
-        Config().save(target)
+        try:
+            Config().save(target)
+        except (OSError, ValueError) as exc:
+            print(f"docktui: config save failed: {exc}", file=sys.stderr)
+            return 1
         print(f"Wrote default config to {target}")
         return 0
     print(json.dumps(config.to_dict(), indent=2, sort_keys=True))

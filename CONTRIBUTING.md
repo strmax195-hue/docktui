@@ -28,7 +28,7 @@ Have an idea to make DockTUI better?
 4. Run the same checks as CI:
 
    ```bash
-   pytest                                  # no Docker daemon needed; subprocess calls are mocked
+   pytest                                  # Docker is opt-in; some tests run local Python processes
    ruff check . && ruff format --check .
    mypy
    ```
@@ -39,7 +39,12 @@ Have an idea to make DockTUI better?
 ### Where things live
 - Non-interactive commands (`status`, `check`) are pure functions in `docktui/report.py` — the easiest place to start contributing, and fully unit-testable.
 - Diagnostics live in `docktui/doctor.py`; every check returns a `CheckResult`.
-- The dashboard is `docktui/tui.py` (one `draw_*` method and one `_handle_key_*` method per view).
+- `docktui/tui.py` coordinates state, jobs and actions. Renderers are in `docktui/views/`; terminal I/O and signal restoration are in `terminal.py`.
+- Background Docker work uses `jobs.py`, connection snapshots and generation guards; mutate UI state only when draining results on the UI thread.
+- Streaming history/completion is in `log_stream.py`; Windows descendants use `processes.py`.
+- Monitoring format/orchestration live in `prometheus.py` and `multihost.py`.
+- Run `DOCKTUI_INTEGRATION=1 python -m unittest tests.test_compose_integration -v` against a disposable local Docker daemon for Compose lifecycle and finite log windows.
+- Release packaging is tested with `python -m build`, `python -m twine check dist/*`, and `python scripts/validate_release.py`; the last command installs the built wheel outside the checkout.
 
 ## Code Guidelines
 - Write clean, PEP 8 compliant Python code.
