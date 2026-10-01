@@ -17,9 +17,11 @@ class TestStreamLifecycle(unittest.TestCase):
     def test_natural_exit_notifies_once(self):
         finished = threading.Event()
         calls = []
+
         def on_stop():
             calls.append(True)
             finished.set()
+
         streamer = LineStreamer([sys.executable, "-c", "print('hello')"], on_stop=on_stop)
         self.assertIsNone(streamer.start())
         try:
@@ -34,9 +36,11 @@ class TestStreamLifecycle(unittest.TestCase):
     def test_cancel_and_failure_are_distinct(self):
         finished = threading.Event()
         results = []
+
         def complete(result):
             results.append(result)
             finished.set()
+
         streamer = LineStreamer([sys.executable, "-c", "raise SystemExit(7)"], on_complete=complete)
         self.assertIsNone(streamer.start())
         self.assertTrue(finished.wait(2))
@@ -47,7 +51,9 @@ class TestStreamLifecycle(unittest.TestCase):
 
         finished.clear()
         results.clear()
-        streamer = LineStreamer([sys.executable, "-c", "import time; time.sleep(30)"], on_complete=complete)
+        streamer = LineStreamer(
+            [sys.executable, "-c", "import time; time.sleep(30)"], on_complete=complete
+        )
         streamer.start()
         streamer.stop()
         self.assertTrue(finished.wait(2))

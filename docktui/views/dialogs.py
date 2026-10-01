@@ -1,13 +1,16 @@
 """Dialogs view rendering."""
 
 from typing import Any
+
 from .. import styles as palette
-from ..screen import clear_screen
-from ..screen import draw_frame
-from ..screen import get_terminal_size
-from ..screen import pad_to_viewport
-from ..screen import slice_viewport
-from ..screen import truncate
+from ..screen import (
+    clear_screen,
+    draw_frame,
+    get_terminal_size,
+    pad_to_viewport,
+    slice_viewport,
+    truncate,
+)
 
 
 class DialogsViews:
@@ -24,7 +27,11 @@ class DialogsViews:
                 cmd for cmd in self.exec_history if self.input_dialog.buffer.lower() in cmd.lower()
             ]
             if matches:
-                print(f"\n{palette.CYAN}Matches: {', '.join(matches[:5])}{palette.RESET}", end="", flush=True)
+                print(
+                    f"\n{palette.CYAN}Matches: {', '.join(matches[:5])}{palette.RESET}",
+                    end="",
+                    flush=True,
+                )
 
     def draw_help_view(self: Any) -> None:
         size = get_terminal_size()
@@ -98,7 +105,9 @@ class DialogsViews:
             value = option["display"]()
             print(f"{style}{marker}{label:<28} {value}{palette.RESET}")
         print("─" * (width - 1))
-        print(f"\n{palette.CYAN}[Up/Down] Move | [Enter] Edit | [S] Save & Apply | [Esc] Back{palette.RESET}")
+        print(
+            f"\n{palette.CYAN}[Up/Down] Move | [Enter] Edit | [S] Save & Apply | [Esc] Back{palette.RESET}"
+        )
 
     def draw_search_view(self: Any) -> None:
         """Show a simple registry search results picker."""
@@ -108,7 +117,9 @@ class DialogsViews:
             clear_screen()
         draw_frame("REGISTRY SEARCH", width)
         if not self.search_results:
-            print(f"{palette.YELLOW}No search results. Use the dialog to enter a query.{palette.RESET}")
+            print(
+                f"{palette.YELLOW}No search results. Use the dialog to enter a query.{palette.RESET}"
+            )
         else:
             for idx, result in enumerate(self.search_results):
                 marker = "» " if idx == self.search_index else "  "
@@ -154,4 +165,3 @@ class DialogsViews:
         print(
             f"\n{palette.CYAN}[Up/Down] Move | [Enter] Open directory | [Backspace] Up | [Esc] Back{palette.RESET}"
         )
-

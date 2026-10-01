@@ -9,9 +9,9 @@ this object.
 
 import json
 import math
+import os
 import re
 import tempfile
-import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar, Optional
@@ -297,15 +297,15 @@ class Config:
         unique = {e["name"]: e for e in self.endpoints}
         self.endpoints = list(unique.values())
         self.hotkey_overlays = {
-            k: v for k, v in (self.hotkey_overlays or {}).items()
+            k: v
+            for k, v in (self.hotkey_overlays or {}).items()
             if isinstance(k, str) and isinstance(v, str) and k and v.strip()
         }
 
     @staticmethod
     def _valid_endpoint(value: Any) -> bool:
         return isinstance(value, dict) and all(
-            isinstance(value.get(key), str) and bool(value[key].strip())
-            for key in ("name", "host")
+            isinstance(value.get(key), str) and bool(value[key].strip()) for key in ("name", "host")
         )
 
     @staticmethod

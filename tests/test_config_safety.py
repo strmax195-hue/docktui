@@ -12,20 +12,25 @@ from docktui.doctor import FAIL, check_config
 class TestConfigSafety(unittest.TestCase):
     def test_replace_failure_keeps_old_file_and_removes_temp(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'config.json'
-            path.write_text('{"theme":"light"}', encoding='utf-8')
+            path = Path(tmp) / "config.json"
+            path.write_text('{"theme":"light"}', encoding="utf-8")
             original = path.read_bytes()
-            with patch('docktui.config.os.replace', side_effect=OSError('disk failure')):
+            with patch("docktui.config.os.replace", side_effect=OSError("disk failure")):
                 with self.assertRaises(OSError):
                     Config().save(path)
             self.assertEqual(path.read_bytes(), original)
             self.assertEqual(list(Path(tmp).iterdir()), [path])
 
     def test_nonfinite_and_nested_values_are_safe_and_diagnosed(self):
-        raw = {'refresh_interval': float('nan'), 'log_max': float('inf'),
-               'log_min': -2, 'endpoints': [{'name': [], 'host': 42}],
-               'log_highlights': [{'pattern': '['}], 'active_endpoint': 'missing',
-               'hotkey_overlays': {'x': []}}
+        raw = {
+            "refresh_interval": float("nan"),
+            "log_max": float("inf"),
+            "log_min": -2,
+            "endpoints": [{"name": [], "host": 42}],
+            "log_highlights": [{"pattern": "["}],
+            "active_endpoint": "missing",
+            "hotkey_overlays": {"x": []},
+        }
         config = Config.from_dict(raw)
         config.validate()
         self.assertTrue(math.isfinite(config.refresh_interval))
@@ -38,19 +43,34 @@ class TestConfigSafety(unittest.TestCase):
             with self.assertRaises(ValueError):
                 config.resolve_host()
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'config.json'
-            path.write_text(json.dumps(raw), encoding='utf-8')
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
             result = check_config(path)
             self.assertEqual(result.status, FAIL)
-            for field in ('refresh_interval', 'log_max', 'endpoints', 'log_highlights', 'active_endpoint'):
+            for field in (
+                "refresh_interval",
+                "log_max",
+                "endpoints",
+                "log_highlights",
+                "active_endpoint",
+            ):
                 self.assertIn(field, result.detail)
 
     def test_inconsistent_limits_and_duplicate_endpoints_are_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'config.json'
-            path.write_text(json.dumps({'log_min': 100, 'log_max': 50,
-                                       'endpoints': [{'name':'a','host':'ssh://a'},
-                                                     {'name':'a','host':'ssh://b'}]}))
+            path = Path(tmp) / "config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "log_min": 100,
+                        "log_max": 50,
+                        "endpoints": [
+                            {"name": "a", "host": "ssh://a"},
+                            {"name": "a", "host": "ssh://b"},
+                        ],
+                    }
+                )
+            )
             error = Config.validate_file(path)
-            self.assertIn('log_min', error)
-            self.assertIn('duplicate', error)
+            self.assertIn("log_min", error)
+            self.assertIn("duplicate", error)

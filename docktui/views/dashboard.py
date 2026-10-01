@@ -1,16 +1,19 @@
 """Dashboard view rendering."""
 
+import time
 from typing import Any
+
 from .. import styles as palette
 from ..enums import StateFilter
-from ..screen import clear_screen
-from ..screen import draw_frame
-from ..screen import draw_status_bar
-from ..screen import get_terminal_size
-from ..screen import list_window
-import time
-from ..screen import truncate
-from ..screen import wrap_hints
+from ..screen import (
+    clear_screen,
+    draw_frame,
+    draw_status_bar,
+    get_terminal_size,
+    list_window,
+    truncate,
+    wrap_hints,
+)
 
 
 class DashboardViews:
@@ -40,7 +43,9 @@ class DashboardViews:
             return
 
         if not self.is_daemon_running_cached():
-            print(f"\n{palette.YELLOW}{palette.BOLD}Warning: Cannot connect to the Docker daemon.{palette.RESET}")
+            print(
+                f"\n{palette.YELLOW}{palette.BOLD}Warning: Cannot connect to the Docker daemon.{palette.RESET}"
+            )
             print("Please make sure Docker Desktop or the docker service is running.")
             print("\nPress 'q' to quit, or 'r' to retry connection.")
             return
@@ -90,7 +95,9 @@ class DashboardViews:
         for idx, tab in enumerate(self.tabs, start=1):
             label = f"{tab_labels[tab]} ({idx})"
             header_parts.append(
-                f"{palette.WHITE_ON_BLUE} {label} {palette.RESET}" if tab == self.current_tab else f"[{label}]"
+                f"{palette.WHITE_ON_BLUE} {label} {palette.RESET}"
+                if tab == self.current_tab
+                else f"[{label}]"
             )
         filter_bits: list[str] = []
         active_filter = self.filters.get(self.current_tab, "")
@@ -175,7 +182,9 @@ class DashboardViews:
             cpu_color = palette.RED if cpu_high else palette.GREEN
             mem_color = palette.RED if mem_high else palette.GREEN
             cpu_alert = f" {palette.RED}{palette.BOLD}[HIGH CPU]{palette.RESET}" if cpu_high else ""
-            mem_alert = f" {palette.RED}{palette.BOLD}[HIGH MEMORY]{palette.RESET}" if mem_high else ""
+            mem_alert = (
+                f" {palette.RED}{palette.BOLD}[HIGH MEMORY]{palette.RESET}" if mem_high else ""
+            )
             print(f"  CPU:  {cpu_color}{cpu_bar}{palette.RESET}{cpu_alert}")
             print(f"  MEM:  {mem_color}{mem_bar} ({c_stats['memory']}){palette.RESET}{mem_alert}")
             print(f"  NET:  {palette.GREEN}{c_stats['net']}{palette.RESET}")
@@ -223,7 +232,9 @@ class DashboardViews:
         if not self.images:
             active_filter = self.filters.get("images")
             if active_filter:
-                print(f"\n{palette.CYAN}No images match the active filter: '{active_filter}'{palette.RESET}")
+                print(
+                    f"\n{palette.CYAN}No images match the active filter: '{active_filter}'{palette.RESET}"
+                )
                 print("Press [C] to clear the filter.")
             else:
                 self.draw_empty_state("images", width)
@@ -251,7 +262,9 @@ class DashboardViews:
         if not self.volumes:
             active_filter = self.filters.get("volumes")
             if active_filter:
-                print(f"\n{palette.CYAN}No volumes match the active filter: '{active_filter}'{palette.RESET}")
+                print(
+                    f"\n{palette.CYAN}No volumes match the active filter: '{active_filter}'{palette.RESET}"
+                )
                 print("Press [C] to clear the filter.")
             else:
                 self.draw_empty_state("volumes", width)
@@ -275,7 +288,9 @@ class DashboardViews:
         if not self.networks:
             active_filter = self.filters.get("networks")
             if active_filter:
-                print(f"\n{palette.CYAN}No networks match the active filter: '{active_filter}'{palette.RESET}")
+                print(
+                    f"\n{palette.CYAN}No networks match the active filter: '{active_filter}'{palette.RESET}"
+                )
                 print("Press [C] to clear the filter.")
             else:
                 self.draw_empty_state("networks", width)
@@ -304,7 +319,9 @@ class DashboardViews:
         if not self.contexts:
             active_filter = self.filters.get("contexts")
             if active_filter:
-                print(f"\n{palette.CYAN}No contexts match the active filter: '{active_filter}'{palette.RESET}")
+                print(
+                    f"\n{palette.CYAN}No contexts match the active filter: '{active_filter}'{palette.RESET}"
+                )
                 print("Press [C] to clear the filter.")
             else:
                 self.draw_empty_state("contexts", width)
@@ -398,7 +415,12 @@ class DashboardViews:
 
             visible_len = len(strip_ansi(line))
             pad_r = max(0, box_w - 4 - visible_len)
-            print(margin + f"{palette.CYAN}│{palette.RESET}  {line}" + " " * pad_r + f" {palette.CYAN}│{palette.RESET}")
+            print(
+                margin
+                + f"{palette.CYAN}│{palette.RESET}  {line}"
+                + " " * pad_r
+                + f" {palette.CYAN}│{palette.RESET}"
+            )
         print(margin + f"{palette.CYAN}└" + "─" * (box_w - 2) + f"┘{palette.RESET}")
         print("\n")
 
@@ -412,4 +434,3 @@ class DashboardViews:
             return f"[{bar}] {percentage_str}", is_high
         except Exception:
             return f"[░░░░░░░░░░░░░░░] {percentage_str}", False
-

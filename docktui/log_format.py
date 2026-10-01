@@ -35,7 +35,9 @@ def colorize_log_line(line: str, highlight: Optional[re.Pattern] = None) -> str:
         base = ""
     text = line
     if highlight is not None:
-        text = highlight.sub(lambda m: f"{palette.MAGENTA}{palette.BOLD}{m.group(0)}{palette.RESET}{base}", text)
+        text = highlight.sub(
+            lambda m: f"{palette.MAGENTA}{palette.BOLD}{m.group(0)}{palette.RESET}{base}", text
+        )
     if base or text != line:
         return f"{base}{text}{palette.RESET}"
     return text
@@ -44,5 +46,3 @@ def colorize_log_line(line: str, highlight: Optional[re.Pattern] = None) -> str:
 # ---------------------------------------------------------------------------
 # Main dashboard
 # ---------------------------------------------------------------------------
-
-
