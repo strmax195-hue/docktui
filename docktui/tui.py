@@ -6,6 +6,7 @@ rendering lives in `views`, with shared helpers in `styles` and `screen`.
 """
 
 import os
+import hashlib
 import re
 import shlex
 import subprocess
@@ -243,6 +244,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self._quit_requested = False
         self._running = False
         self.jobs = JobRunner()
+        self._view_requests: dict[str, str] = {}
         self._ui_lines: deque = deque(maxlen=max(1, self.config.log_max))
         self._ui_events: deque = deque(maxlen=100)
         self.event_feed = EventFeed()
@@ -553,18 +555,27 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                     self._apply_log_text(raw, viewport_height, follow)
                     self.need_redraw = True
 
-            self._docker_job("view:logs", method, (target,), apply, tail=self.log_tail_limit, **self._log_options())
+            self._docker_job(
+                "view:logs",
+                method,
+                (target,),
+                apply,
+                tail=self.log_tail_limit,
+                **self._log_options(),
+            )
             return
         if container_id is None and self.active_project:
             raw_logs = self.client.get_compose_project_logs(
                 self.active_project, tail=self.log_tail_limit, **self._log_options()
             )
         else:
-            raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit, **self._log_options())  # type: ignore
+            raw_logs = self.client.get_logs(
+                container_id, tail=self.log_tail_limit, **self._log_options()
+            )  # type: ignore
         self._apply_log_text(raw_logs, viewport_height, follow)
 
     def _apply_log_text(self, raw_logs: str, viewport_height: int, follow: bool) -> None:
-        self.log_lines = raw_logs.splitlines()[-self.config.log_max:]
+        self.log_lines = raw_logs.splitlines()[-self.config.log_max :]
         self._logs_loaded = True
         visible = self.visible_log_lines()
         if follow or self.log_scroll_index >= max(0, len(visible) - viewport_height - 1):
@@ -575,11 +586,16 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         return self.log_streamer is not None and self.log_streamer.is_running()
 
     def start_log_stream(self, container_id: Optional[str], project_name: Optional[str]) -> None:
+        if self.log_until:
+            self.log_follow = False
+            return
         if self.is_log_streaming():
             return
         self.stop_log_stream()
 
-        cmd = self.client.logs_command(container_id, project_name, tail=0, follow=True, **self._log_options())
+        cmd = self.client.logs_command(
+            container_id, project_name, tail=0, follow=True, **self._log_options()
+        )
 
         token = self._log_generation
         generation = self.client.connection_generation
@@ -624,7 +640,11 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if not query or not self.visible_log_lines():
             self.set_status("Set a log search first with '/'.")
             return
-        matches = [idx for idx, line in enumerate(self.visible_log_lines()) if query.lower() in line.lower()]
+        matches = [
+            idx
+            for idx, line in enumerate(self.visible_log_lines())
+            if query.lower() in line.lower()
+        ]
         if not matches:
             self.set_status(f"No log matches for '{query}'.")
             return
@@ -743,7 +763,11 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             if generation == self.client.connection_generation:
                 callback()
         self.jobs.drain(self.client.connection_generation)
-        if self.events_enabled and self.event_streamer is None and time.monotonic() >= self._event_retry_at:
+        if (
+            self.events_enabled
+            and self.event_streamer is None
+            and time.monotonic() >= self._event_retry_at
+        ):
             self._start_events()
 
     def _snapshot_request(self) -> tuple[str, str, str, str]:
@@ -859,6 +883,13 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if not self._running:
             apply(getattr(client, method)(*args, **kwargs))
             return
+
+        if key.startswith("view:"):
+            identity = hashlib.sha256(repr((method, args, kwargs, self.client.connection_generation, self._log_generation)).encode()).hexdigest()
+            if self._view_requests.get(key) != identity:
+                self.jobs.cancel_prefix(key + ":")
+                self._view_requests[key] = identity
+            key += ":" + identity
 
         def work(cancel):
             client.cancel_event = cancel
@@ -1248,13 +1279,24 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.start_input("New endpoint: name|host|description (description optional): ", submit)
 
     def use_selected_context(self) -> None:
-        if self.client.docker_host or self.client.command_env().get("DOCKER_CONTEXT"):
+        if self.client.docker_host or os.environ.get("DOCKER_CONTEXT"):
             self.set_status("Cannot switch context: DOCKER_HOST is active and overrides context.")
             return
         if self.current_tab == "contexts" and self.contexts:
             sel_ctx = self.contexts[self.selected_context_index]
             self.set_status(f"Switching Docker context to {sel_ctx['name']}...")
-            self._action("use_context", sel_ctx["name"])
+            name = sel_ctx["name"]
+            def apply(result):
+                ok, message = result
+                if ok:
+                    self._reset_connection_state()
+                    self.client.set_context(name)
+                    self.current_context = name
+                    self.active_endpoint = None
+                    self.config.active_endpoint = None
+                    self.refresh_data()
+                self.set_status(message)
+            self._docker_job("action", "use_context", (name,), apply)
             return
         if self.endpoints:
             entry = (
@@ -1269,7 +1311,17 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if not host:
             self.set_status("Endpoint has no host.")
             return
+        self._reset_connection_state()
+        self.client.set_host(host)
+        self.active_endpoint = endpoint.get("name")
+        self.config.active_endpoint = self.active_endpoint
+        self.set_status(f"Switched to endpoint {endpoint.get('name', '?')} ({host}).")
+        self.refresh_data()
+
+    def _reset_connection_state(self) -> None:
         self.jobs.cancel_all()
+        self._view_requests.clear()
+        self._logs_loaded = False
         self.refresh_in_progress = False
         self.stop_events()
         self.stop_log_stream()
@@ -1277,7 +1329,6 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.pull_streamer.stop()
             self.pull_streamer = None
         with self.data_lock:
-            self.client.set_host(host)
             for name in (
                 "containers",
                 "images",
@@ -1300,11 +1351,6 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.last_refresh = 0.0
             self.daemon_running = False
             self.last_daemon_check = 0.0
-        self.active_endpoint = endpoint.get("name")
-        self.config.active_endpoint = self.active_endpoint
-        self.set_status(f"Switched to endpoint {endpoint.get('name', '?')} ({host}).")
-        self.refresh_data()
-
     # ------------------------------------------------------------- modal helpers
 
     def _start_filter_prompt(self, _key: str) -> None:
@@ -1439,7 +1485,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.pinned_project = self.active_project
         if self.view_mode == ViewMode.LOGS:
             # A pinned log pane is only useful if it keeps updating.
-            self.log_follow = True
+            self.log_follow = not bool(self.log_until)
         self.view_mode = ViewMode.MAIN
         self.set_status("Pinned pane to the bottom half. Shift+P to unpin.")
 
@@ -1736,7 +1782,11 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self._reload_log_window()
             return True
         if key == "w":
-            self.start_input("Log window SINCE,UNTIL (empty clears): ", self._set_log_window, initial=f"{self.log_since},{self.log_until}")
+            self.start_input(
+                "Log window SINCE,UNTIL (empty clears): ",
+                self._set_log_window,
+                initial=f"{self.log_since},{self.log_until}",
+            )
             return True
         if key == "h":
             self._toggle_log_highlights()
@@ -2340,6 +2390,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             def apply() -> None:
                 if epoch == self._event_epoch and self.event_feed.append(line):
                     self.need_redraw = True
+
             self._post_ui(apply, generation, line=True)
 
         def complete(result: StreamResult) -> None:
@@ -2347,14 +2398,19 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                 if epoch == self._event_epoch:
                     self.event_streamer = None
                     self.event_feed.disconnect(result.returncode)
+                    if result.error:
+                        self.event_feed.status += f": {result.error}"
                     self._event_retry_at = time.monotonic() + 2
                     self.need_redraw = True
+
             self._post_ui(apply, generation)
 
         self.event_feed.status = "connecting"
         self.event_streamer = LineStreamer(
-            client.events_command(target, self.event_feed.since), receive,
-            env=client.command_env(), on_complete=complete,
+            client.events_command(target, self.event_feed.since),
+            receive,
+            env=client.command_env(),
+            on_complete=complete,
         )
         self.event_streamer.start()
 
@@ -2368,18 +2424,31 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.event_feed = EventFeed()
 
     def _log_options(self) -> dict[str, Any]:
-        return {key: value for key, value in {"since": self.log_since, "until": self.log_until, "timestamps": self.log_timestamps}.items() if value}
+        return {
+            key: value
+            for key, value in {
+                "since": self.log_since,
+                "until": self.log_until,
+                "timestamps": self.log_timestamps,
+            }.items()
+            if value
+        }
 
     def visible_log_lines(self) -> list[str]:
-        return [line for line in self.log_lines
-                if (not self.log_errors_only or _log_is_error_line(line))
-                and _log_matches_filter(line, self.log_filter)]
+        return [
+            line
+            for line in self.log_lines
+            if (not self.log_errors_only or _log_is_error_line(line))
+            and _log_matches_filter(line, self.log_filter)
+        ]
 
     def _log_highlights(self) -> list[dict[str, str]]:
         target = self.active_container or {}
-        keys = [f"container:{target.get('name', '')}",
-                f"service:{target.get('compose_project', '')}/{target.get('compose_service', '')}",
-                f"project:{self.active_project or target.get('compose_project', '')}"]
+        keys = [
+            f"container:{target.get('name', '')}",
+            f"service:{target.get('compose_project', '')}/{target.get('compose_service', '')}",
+            f"project:{self.active_project or target.get('compose_project', '')}",
+        ]
         for key in keys:
             if key in self.config.log_presets:
                 return self.config.log_presets[key]

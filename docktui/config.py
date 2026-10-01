@@ -79,12 +79,7 @@ class Config:
         if self.exec_presets is None:
             self.exec_presets = list(DEFAULT_EXEC_PRESETS)
         if self.log_highlights is None:
-            self.log_presets = {
-            key: [h for h in highlights if self._valid_highlight(h)]
-            for key, highlights in self.log_presets.items()
-            if isinstance(key, str) and isinstance(highlights, list)
-        }
-        self.log_highlights = []
+            self.log_highlights = []
         if self.endpoints is None:
             self.endpoints = []
         if self.hotkey_overlays is None:
@@ -401,7 +396,9 @@ class Config:
             errors.append("hotkey_overlays must map keys to non-empty command strings")
         presets = raw.get("log_presets", {})
         if not isinstance(presets, dict) or any(
-            not isinstance(k, str) or not isinstance(v, list) or any(not cls._valid_highlight(h) for h in v)
+            not isinstance(k, str)
+            or not isinstance(v, list)
+            or any(not cls._valid_highlight(h) for h in v)
             for k, v in presets.items()
         ):
             errors.append("log_presets must map target keys to valid highlight patterns")

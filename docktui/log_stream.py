@@ -6,7 +6,9 @@ import subprocess
 import threading
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
+
+from .processes import close_windows_tree, kill_process_tree, own_windows_tree
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class LineStreamer:
         self._completed = False
         self._cancelled = False
         self._owns_group = False
+        self._windows_owner: Any = None
         self.result: Optional[StreamResult] = None
 
     @property
@@ -79,8 +82,11 @@ class LineStreamer:
                 **options,
             )
         except (OSError, ValueError) as exc:
-            return f"Error starting stream: {exc}"
+            error = f"Error starting stream: {exc}"
+            self._finish(StreamResult(-1, error=error))
+            return error
         self._process = process
+        self._windows_owner = own_windows_tree(process)
         self._owns_group = True
         readers = []
         for stream in (process.stdout, process.stderr):
@@ -118,6 +124,7 @@ class LineStreamer:
             self._signal_process(process, kill=True)
             for thread in readers:
                 thread.join(timeout=1.0)
+        close_windows_tree(self._take_windows_owner())
         self._finish(StreamResult(code, self._cancelled))
 
     def _finish(self, result: StreamResult) -> None:
@@ -131,7 +138,16 @@ class LineStreamer:
         if self.on_stop is not None:
             self.on_stop()
 
+    def _take_windows_owner(self) -> Any:
+        with self._lock:
+            owner = self._windows_owner
+            self._windows_owner = None
+            return owner
+
     def _signal_process(self, process: subprocess.Popen, kill: bool = False) -> None:
+        if kill and self._owns_group:
+            kill_process_tree(process, self._take_windows_owner())
+            return
         if self._owns_group and os.name == "posix":
             try:
                 os.killpg(process.pid, signal.SIGKILL if kill else signal.SIGTERM)
@@ -158,15 +174,16 @@ class LineStreamer:
                 process.wait(timeout=max(timeout, 1.0))
             except ProcessLookupError:
                 pass
-        if self._owns_group and os.name == "posix":
+        if self._owns_group:
             self._signal_process(process, kill=True)
         for thread in self._threads:
             if thread is not threading.current_thread():
                 thread.join(timeout=max(timeout, 1.0))
         code = process.poll()
         self._finish(StreamResult(code if isinstance(code, int) else -1, self._cancelled))
-        for stream in (process.stdout, process.stderr):
-            if stream is not None:
-                stream.close()
+        if not any(thread.is_alive() for thread in self._threads):
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
         self._threads = []
         self._process = None

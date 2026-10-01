@@ -13,11 +13,11 @@ import argparse
 import hashlib
 import json
 import math
-import threading
 import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -118,8 +118,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_filter_args(p_status)
     output = p_status.add_mutually_exclusive_group()
     output.add_argument("--json", action="store_true", help="Emit JSON for scripting.")
-    output.add_argument("--prometheus", action="store_true", help="Emit Prometheus textfile metrics.")
-    p_status.add_argument("--metrics-limit", type=_positive_int, default=1000, help="Maximum per-container metric labels (1..10000).")
+    output.add_argument(
+        "--prometheus", action="store_true", help="Emit Prometheus textfile metrics."
+    )
+    p_status.add_argument(
+        "--metrics-limit",
+        type=_positive_int,
+        default=1000,
+        help="Maximum per-container metric labels (1..10000).",
+    )
     p_status.add_argument(
         "--no-stats", action="store_true", help="Skip `docker stats` (faster on busy hosts)."
     )
@@ -155,8 +162,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Critical if no running container matches GLOB (repeatable).",
     )
     p_check.add_argument("--hosts", help="Comma-separated configured endpoint names (up to 64).")
-    p_check.add_argument("--workers", type=_positive_int, default=4, help="Concurrent host checks, capped at 16.")
-    p_check.add_argument("--host-timeout", type=_positive_seconds, default=None, help="Total seconds per endpoint, including all commands.")
+    p_check.add_argument(
+        "--workers", type=_positive_int, default=4, help="Concurrent host checks, capped at 16."
+    )
+    p_check.add_argument(
+        "--host-timeout",
+        type=_positive_seconds,
+        default=None,
+        help="Total seconds per endpoint, including all commands.",
+    )
     p_check.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     p_check.add_argument(
         "--quiet", "-q", action="store_true", help="Print nothing; only set the exit code."
@@ -253,7 +267,10 @@ def cmd_status(args: argparse.Namespace, config: Config) -> int:
     except (DockerError, subprocess.SubprocessError, OSError) as exc:
         if args.prometheus:
             from .prometheus import format_metrics
-            print(format_metrics([], endpoint=_metrics_endpoint(args, config), success=False), end="")
+
+            print(
+                format_metrics([], endpoint=_metrics_endpoint(args, config), success=False), end=""
+            )
         elif args.json:
             print(json.dumps({"status": "UNKNOWN", "exit_code": 1, "error": str(exc)}))
         else:
@@ -261,7 +278,13 @@ def cmd_status(args: argparse.Namespace, config: Config) -> int:
         return 1
     if args.prometheus:
         from .prometheus import format_metrics
-        print(format_metrics(rows, endpoint=_metrics_endpoint(args, config), limit=args.metrics_limit), end="")
+
+        print(
+            format_metrics(
+                rows, endpoint=_metrics_endpoint(args, config), limit=args.metrics_limit
+            ),
+            end="",
+        )
         return 0
     if args.json:
         print(json.dumps(rows, indent=2))
@@ -439,16 +462,28 @@ def cmd_check_hosts(args: argparse.Namespace, config: Config) -> int:
         client._environment = dict(environment)
         client.cancel_event = threading.Event()
         client.deadline = deadline
-        rows = _collect_rows(client, args, with_stats=args.cpu_warn is not None or args.mem_warn is not None)
-        findings = evaluate(rows, cpu_warn=args.cpu_warn, mem_warn=args.mem_warn, require_running=args.require)
+        rows = _collect_rows(
+            client, args, with_stats=args.cpu_warn is not None or args.mem_warn is not None
+        )
+        findings = evaluate(
+            rows, cpu_warn=args.cpu_warn, mem_warn=args.mem_warn, require_running=args.require
+        )
         return {**json.loads(check_json(findings, rows)), "rows": rows}
 
-    results = check_hosts([(name, targets.get(name, "")) for name in names], check,
-                          workers=args.workers, timeout=args.host_timeout or config.docker_timeout)
+    results = check_hosts(
+        [(name, targets.get(name, "")) for name in names],
+        check,
+        workers=args.workers,
+        timeout=args.host_timeout or config.docker_timeout,
+    )
     level = aggregate_levels([r["exit_code"] for r in results])
     if not args.quiet:
         if args.json:
-            print(json.dumps({"status": LEVEL_NAMES[level], "exit_code": level, "hosts": results}, indent=2))
+            print(
+                json.dumps(
+                    {"status": LEVEL_NAMES[level], "exit_code": level, "hosts": results}, indent=2
+                )
+            )
         else:
             print(f"DOCKTUI {LEVEL_NAMES[level]} - {len(results)} endpoints")
             for result in results:

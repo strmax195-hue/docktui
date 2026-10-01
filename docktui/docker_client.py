@@ -58,6 +58,13 @@ class DockerClient:
         self._host_override = host
         self.connection_generation += 1
 
+    def set_context(self, context: str) -> None:
+        self._host_override = None
+        self._environment = self.command_env()
+        self._environment.pop("DOCKER_HOST", None)
+        self._environment["DOCKER_CONTEXT"] = context
+        self.connection_generation += 1
+
     def command_env(self) -> dict[str, str]:
         """An independent connection environment for every subprocess."""
         env = dict(self._environment if self._environment is not None else os.environ)
@@ -597,8 +604,13 @@ class DockerClient:
     # ------------------------------------------------------------------ logs / inspect
 
     def logs_command(
-        self, container_id: Optional[str], project_name: Optional[str] = None,
-        tail: int = 40, since: str = "", until: str = "", timestamps: bool = False,
+        self,
+        container_id: Optional[str],
+        project_name: Optional[str] = None,
+        tail: int = 40,
+        since: str = "",
+        until: str = "",
+        timestamps: bool = False,
         follow: bool = False,
     ) -> list[str]:
         command = [str(self.docker_bin)]
@@ -607,6 +619,8 @@ class DockerClient:
         if since:
             command.append(f"--since={since}")
         if until:
+            if project_name:
+                raise ValueError("Compose finite windows require per-container log collection")
             command.append(f"--until={until}")
         if timestamps:
             command.append("--timestamps")
@@ -621,12 +635,24 @@ class DockerClient:
     def get_logs(self, container_id: str, tail: int = 40, **options) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        return self._capture(self.logs_command(container_id, tail=tail, **options), action="reading logs")
+        return self._capture(
+            self.logs_command(container_id, tail=tail, **options), action="reading logs"
+        )
 
     def get_compose_project_logs(self, project_name: str, tail: int = 40, **options) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        return self._capture(self.logs_command(None, project_name, tail=tail, **options), action="reading Compose logs")
+        if options.get("until"):
+            rows = [row for row in self.list_containers() if row.get("compose_project") == project_name]
+            output = []
+            for row in rows:
+                prefix = row.get("compose_service") or row.get("name") or row["id"]
+                output.extend(f"{prefix} | {line}" for line in self.get_logs(row["id"], tail=tail, **options).splitlines())
+            return "\n".join(output)
+        return self._capture(
+            self.logs_command(None, project_name, tail=tail, **options),
+            action="reading Compose logs",
+        )
 
     def inspect_container(self, container_id: str) -> str:
         if not self.is_docker_installed():
@@ -1177,7 +1203,16 @@ class DockerClient:
         return "\n".join(lines)
 
     def events_command(self, container_id: str, since: Optional[str] = None) -> list[str]:
-        command = [str(self.docker_bin), "events", "--format", "{{json .}}", "--filter", "type=container", "--filter", f"container={container_id}"]
+        command = [
+            str(self.docker_bin),
+            "events",
+            "--format",
+            "{{json .}}",
+            "--filter",
+            "type=container",
+            "--filter",
+            f"container={container_id}",
+        ]
         for action in ("die", "restart", "oom", "health_status", "destroy"):
             command.extend(["--filter", f"event={action}"])
         if since:

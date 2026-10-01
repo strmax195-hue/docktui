@@ -2,8 +2,8 @@ import os
 import signal
 import subprocess
 import sys
-import unittest
 import time
+import unittest
 
 
 @unittest.skipUnless(os.name == "posix", "Unix PTY coverage")

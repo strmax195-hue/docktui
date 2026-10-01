@@ -406,8 +406,8 @@ Configuration writes use atomic replacement: failed writes preserve the previous
 file. `docktui doctor` reports invalid original values even when runtime settings
 use safe defaults. Unknown active endpoints fail rather than selecting a
 different Docker host. CI requires 50% combined statement/branch coverage and
-35% branch coverage; the observed pre-refactor combined coverage was 52%
-(approximately 40% branches), with coverage JSON retained as an artifact.
+35% branch coverage. The measured diagnostics baseline was 53.29% combined
+and 42.23% branches; coverage JSON is retained as an artifact.
 
 ### Container diagnosis
 
@@ -415,7 +415,7 @@ Details (`V`) shows the latest healthcheck probe time, exit code and output
 (up to 4096 characters). Press `E` in Details to toggle a bounded feed of
 container die/restart/OOM/health/destroy events. Disconnects are displayed; the
 feed reconnects using its last nanosecond cursor and suppresses replayed events.
-Events use the selected connection and stop on endpoint switches or app exit.
+Events use the selected connection and stop on context/endpoint switches or app exit.
 
 ### Log windows and target highlights
 
@@ -423,6 +423,8 @@ In Logs, `W` sets `SINCE,UNTIL` (Docker duration or timestamp strings); empty
 values clear boundaries. `T` toggles timestamps. A finite Until window disables
 follow; clear Until before enabling it. Errors-only, search and clear-filter
 operate on the retained bounded history, so changing them preserves lines.
+Finite Compose windows use supported per-container Docker logs commands, with
+service prefixes; they do not pass the unsupported --until flag to Compose.
 
 Persistent defaults use `log_since`, `log_until`, `log_timestamps`. Highlight
 presets are selected by container name, then Compose service, then project:
