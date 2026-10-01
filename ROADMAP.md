@@ -62,7 +62,7 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - [x] Keep TUI navigation responsive during slow operations.
 - [x] Split terminal I/O and view rendering from the dashboard coordinator.
 - [x] Save and validate configuration safely; strengthen CI.
-- [ ] Publish one tested package artifact through a single release pipeline.
+- [x] Prepare one verified package artifact and a single opt-in release pipeline (publishing setup remains external).
 
 The implementation plan is in [docs/superpowers/plans/2026-10-01-docktui-improvements.md](docs/superpowers/plans/2026-10-01-docktui-improvements.md).
 

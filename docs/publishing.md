@@ -1,54 +1,29 @@
-# PyPI publishing
+# Package publishing
 
-DockTUI is currently installed from GitHub:
+Install the published v1.4.0 wheel from GitHub Releases or use the GitHub
+checkout instructions in README. The source targets v1.5.0; it is not released
+yet. Do not recommend `pipx install docktui` until the PyPI project and publisher
+are verified. PyPI availability and account ownership could not be checked in
+this execution environment.
 
-```bash
-pipx install git+https://github.com/strmax195-hue/docktui.git
-```
+## One tested artifact
 
-Publishing to PyPI makes `pipx install docktui` / `pip install docktui` work. The package has no runtime dependencies; the `dev` extra only installs build, lint and test tools.
+`.github/workflows/release.yml` runs tests, lint and type checks, builds once,
+checks the distributions with Twine, validates source/wheel/tag versions and
+installs the actual wheel in a clean venv outside the checkout. Both GitHub
+assets and PyPI consume the same retained artifacts. A mismatched release tag
+blocks both. Pull requests validate builds without publishing.
 
-## Trusted Publishing (recommended)
+`publish.yml` is a disabled legacy entrypoint and never publishes.
 
-`.github/workflows/publish.yml` builds the package and uploads it with `pypa/gh-action-pypi-publish` whenever a GitHub Release is published. It uses PyPI Trusted Publishing, so no API token is stored in GitHub. **Until the one-time setup below is done, that job fails on every release** (the `Release` workflow that attaches the wheel to the GitHub release is unaffected).
+## Trusted Publishing setup
 
-One-time setup:
+1. Verify the PyPI project name and maintainer ownership (or create a pending publisher).
+2. Configure owner `strmax195-hue`, repository `docktui`, workflow `release.yml`, environment `pypi`.
+3. Create the GitHub `pypi` environment and configure its reviewers if needed.
+4. Set repository variable `ENABLE_PYPI_PUBLISH=true` only after setup is verified.
+5. Publish an approved release with matching tag/version and inspect both upload jobs.
 
-1. Sign in to PyPI and open *Your projects → Publishing* (for a new project: "Add a new pending publisher").
-2. Owner `strmax195-hue`, repository `docktui`, workflow name `publish.yml`, environment `pypi`.
-3. In GitHub, create the `pypi` environment (*Settings → Environments*), optionally with required reviewers.
-4. Publish the next GitHub Release; the package appears on PyPI.
-
-After the first upload, add the PyPI badge and `pipx install docktui` back to the README.
-
-## Manual setup
-
-1. Create a PyPI account.
-2. Create a PyPI API token.
-3. Store the token locally for Twine, or paste it when prompted.
-
-## Build
-
-```bash
-python -m pip install -e ".[dev]"
-python -m build
-python -m twine check dist/*
-```
-
-## Upload to TestPyPI
-
-```bash
-python -m twine upload --repository testpypi dist/*
-```
-
-## Upload to PyPI
-
-```bash
-python -m twine upload dist/*
-```
-
-After publishing, users can install DockTUI with:
-
-```bash
-pip install docktui
-```
+PyPI publishing is opt-in and otherwise skipped; GitHub assets still attach
+when validation passes. Homebrew remains a separate step after a stable PyPI
+release. Actions are pinned to reviewed commit SHAs and updated by Dependabot.

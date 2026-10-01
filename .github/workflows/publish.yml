@@ -1,28 +1,14 @@
-name: Publish to PyPI
+name: Legacy publishing entrypoint
 
+# All build, verification and publication now lives in release.yml.
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  pypi-publish:
-    name: Build and publish to PyPI
+  migrated:
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/docktui
-    permissions:
-      id-token: write
-      contents: read
     steps:
-    - uses: actions/checkout@v7
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: "3.12"
-    - name: Install build tool
-      run: python -m pip install --upgrade pip build
-    - name: Build a binary wheel and a source tarball
-      run: python -m build
-    - name: Publish package distributions to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - run: echo "Use the Release workflow; this legacy entrypoint never publishes."

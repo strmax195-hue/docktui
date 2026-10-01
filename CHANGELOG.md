@@ -24,6 +24,7 @@ A release focused on people who run Docker hosts: scriptable health checks, diag
 - `py.typed` marker, `Typing :: Typed` and sysadmin classifiers; CI integration job against a real Docker daemon; CLI smoke tests; release workflow attaches the wheel and sdist to the GitHub release and checks the tag matches the package version.
 
 ### Fixed
+- Release publication now consumes one artifact after tests, lint, type checks, Twine, tag/version validation and clean wheel installation. PyPI is opt-in after Trusted Publishing setup; Actions use pinned SHAs.
 - Configuration saves use an fsynced temporary file and atomic replacement. Nonfinite numbers, invalid endpoint structures, duplicate names, inconsistent log limits and malformed regexes are diagnosed by doctor. Runtime sanitizes unsafe values; unresolved active endpoints still fail explicitly to prevent a wrong-host fallback.
 - Stream history is bounded to 500 lines by default, natural subprocess exit emits exactly one completion result, and cancellation is distinguished from failure. Reader pipes are closed, killed processes are reaped, and image pulls are stopped when the dashboard exits.
 - Compose lifecycle commands now place project/file options after `docker compose`, retain ordered override files, validate local config paths, and use a longer timeout for builds. Real Compose lifecycle coverage runs in integration CI.
