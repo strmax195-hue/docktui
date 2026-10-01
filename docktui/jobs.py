@@ -2,12 +2,13 @@
 
 import os
 import queue
-import signal
 import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
+
+from .processes import close_windows_tree, kill_process_tree, own_windows_tree
 
 
 class JobRunner:
@@ -72,6 +73,12 @@ class JobRunner:
             else:
                 apply(value)
 
+    def cancel_prefix(self, prefix: str) -> None:
+        with self._condition:
+            for key in list(self._active):
+                if key.startswith(prefix):
+                    self._active.pop(key).set()
+
     def cancel_all(self) -> None:
         with self._condition:
             for cancel in self._active.values():
@@ -87,9 +94,7 @@ class JobRunner:
         self._executor.shutdown(wait=False)
 
 
-def run_cancellable(
-    cmd: list[str], cancel: threading.Event, **kwargs
-) -> subprocess.CompletedProcess:
+def run_cancellable(cmd: list[str], cancel: threading.Event, **kwargs) -> subprocess.CompletedProcess:
     """subprocess.run semantics with bounded waits and explicit cancellation."""
     check = kwargs.pop("check", False)
     timeout = kwargs.pop("timeout", None)
@@ -101,32 +106,42 @@ def run_cancellable(
         kwargs["stdin"] = subprocess.PIPE
     if os.name == "posix":
         kwargs["start_new_session"] = True
+    elif os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     deadline = time.monotonic() + timeout if timeout is not None else None
-    with subprocess.Popen(cmd, **kwargs) as process:
-        try:
-            while True:
-                if cancel.is_set():
-                    raise RuntimeError(
-                        "Operation canceled; Docker-side work may already have started."
-                    )
-                if deadline is not None and time.monotonic() >= deadline:
-                    raise subprocess.TimeoutExpired(cmd, timeout)
-                try:
-                    stdout, stderr = process.communicate(data, timeout=0.05)
-                    break
-                except subprocess.TimeoutExpired:
-                    data = None
-        except BaseException:
-            if os.name == "posix":
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            else:
-                process.kill()
-            process.communicate()
-            raise
+    process = subprocess.Popen(cmd, **kwargs)
+    owner = own_windows_tree(process)
+    cleanup_finished = True
+    try:
+        while True:
+            if cancel.is_set():
+                raise RuntimeError("Operation canceled; Docker-side work may already have started.")
+            if deadline is not None and time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            try:
+                stdout, stderr = process.communicate(data, timeout=0.05)
+                break
+            except subprocess.TimeoutExpired:
+                data = None
         result = subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
         if check and result.returncode:
             raise subprocess.CalledProcessError(result.returncode, cmd, stdout, stderr)
         return result
+    except BaseException:
+        kill_process_tree(process, owner)
+        owner = None
+        try:
+            process.communicate(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            # Do not close pipes from this thread while a Windows reader owns
+            # their lock. A daemon cleanup reader finishes when EOF arrives.
+            cleanup_finished = False
+            threading.Thread(target=process.communicate, daemon=True).start()
+        process.wait(timeout=0.5)
+        raise
+    finally:
+        close_windows_tree(owner)
+        if cleanup_finished:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()

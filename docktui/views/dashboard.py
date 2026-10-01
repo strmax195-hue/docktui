@@ -1,7 +1,7 @@
 """Dashboard view rendering."""
 
 import time
-from typing import Any
+from typing import Any, Optional
 
 from .. import styles as palette
 from ..enums import StateFilter
@@ -17,6 +17,7 @@ from ..screen import (
 
 
 class DashboardViews:
+    _list_clipped: Optional[tuple[int, int, int]]
     def draw_main_view(self: Any) -> None:
         size = get_terminal_size()
         width = size.width
