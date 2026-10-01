@@ -533,8 +533,9 @@ class TestDockerClient(unittest.TestCase):
         self.assertFalse(success)
         self.assertIn("Error: network in use", msg)
 
+    @patch("pathlib.Path.is_file", return_value=True)
     @patch("subprocess.run")
-    def test_run_compose_cmd(self, mock_run):
+    def test_run_compose_cmd(self, mock_run, _is_file):
         self.client.docker_bin = "docker"
         mock_run.return_value = MagicMock(returncode=0, stdout="Started compose")
 
@@ -542,19 +543,19 @@ class TestDockerClient(unittest.TestCase):
         self.assertTrue(success)
         self.assertIn("Started compose", msg)
         mock_run.assert_called_with(
-            ["docker", "-f", "docker-compose.yml", "compose", "up", "-d"],
+            ["docker", "compose", "-p", "myproject", "-f", "docker-compose.yml", "up", "-d"],
             capture_output=True,
             text=True,
             check=False,
             encoding="utf-8",
             errors="replace",
-            timeout=10.0,
+            timeout=300.0,
         )
 
         success, msg = self.client.run_compose_cmd("myproject", "", "down")
         self.assertTrue(success)
         mock_run.assert_called_with(
-            ["docker", "-p", "myproject", "compose", "down"],
+            ["docker", "compose", "-p", "myproject", "down"],
             capture_output=True,
             text=True,
             check=False,

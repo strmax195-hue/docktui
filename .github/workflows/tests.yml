@@ -67,6 +67,11 @@ jobs:
           docker run --name ci-crashed busybox sh -c "exit 3" || true
           sleep 5
 
+      - name: Compose lifecycle integration
+        env:
+          DOCKTUI_INTEGRATION: "1"
+        run: python -m unittest tests.test_compose_integration -v
+
       - name: docktui doctor
         run: docktui doctor || true
 
@@ -109,3 +114,18 @@ jobs:
 
       - name: Run mypy
         run: mypy
+
+      - name: Prepare formatting diagnostic patch
+        if: failure()
+        run: |
+          ruff check --fix . || true
+          ruff format .
+          git diff > /tmp/docktui-format.patch
+
+      - name: Upload formatting diagnostic patch
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: formatting-diagnostic
+          path: /tmp/docktui-format.patch
+

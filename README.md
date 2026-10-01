@@ -235,6 +235,7 @@ docktui -H ssh://admin@prod-1          # or: export DOCKER_HOST=ssh://admin@prod
 docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCKER_CERT_PATH as usual
 ```
 
+- **Compose files:** Compose runs on the machine running DockTUI. Paths from a remote container's labels must exist locally; missing files or working directories are reported explicitly. Multiple config files keep their override order. Build/up operations allow at least 300 seconds.
 - **SSH** runs non-interactively: use key-based auth (agent loaded) and make sure the host key is already in `known_hosts`, otherwise SSH waits for a prompt that never comes.
 - **Plain `tcp://…:2375`** is unauthenticated and unencrypted; `docktui doctor` warns about it. Prefer `ssh://` or TLS on 2376.
 - **Connection priority:** an explicit `-H` wins; otherwise Docker environment (`DOCKER_CONTEXT`, then `DOCKER_HOST`) wins over `active_endpoint` in config, followed by Docker's current context. All snapshot, streaming and interactive commands use the same connection; DockTUI never changes your process environment. An unknown configured endpoint produces a configuration error.

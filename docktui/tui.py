@@ -2130,7 +2130,9 @@ class ContainerDashboard:
         config_file = row.get("config_file", "")
         if action == ComposeAction.UP.value and not self.compose_rows:
             return
-        success, msg = self.client.run_compose_cmd(project, config_file, action)
+        success, msg = self.client.run_compose_cmd(
+            project, config_file, action, working_dir=row.get("working_dir") or None
+        )
         self.set_status(msg if success else f"Compose {action} failed: {msg}")
         self.refresh_data()
 
@@ -2958,13 +2960,19 @@ class ContainerDashboard:
             if confirm in ("y", "yes"):
                 self.set_status(f"Starting compose project '{row['project']}' with --build...")
                 success, msg = self.client.run_compose_cmd(
-                    row["project"], row.get("config_file", ""), ComposeAction.UP_BUILD.value
+                    row["project"],
+                    row.get("config_file", ""),
+                    ComposeAction.UP_BUILD.value,
+                    working_dir=row.get("working_dir") or None,
                 )
                 self.set_status(msg if success else f"Compose up failed: {msg}")
             elif confirm in ("n", "no"):
                 self.set_status(f"Starting compose project '{row['project']}'...")
                 success, msg = self.client.run_compose_cmd(
-                    row["project"], row.get("config_file", ""), ComposeAction.UP.value
+                    row["project"],
+                    row.get("config_file", ""),
+                    ComposeAction.UP.value,
+                    working_dir=row.get("working_dir") or None,
                 )
                 self.set_status(msg if success else f"Compose up failed: {msg}")
             else:
@@ -2978,7 +2986,10 @@ class ContainerDashboard:
             ):
                 self.set_status(f"Downing compose project '{row['project']}'...")
                 success, msg = self.client.run_compose_cmd(
-                    row["project"], row.get("config_file", ""), ComposeAction.DOWN.value
+                    row["project"],
+                    row.get("config_file", ""),
+                    ComposeAction.DOWN.value,
+                    working_dir=row.get("working_dir") or None,
                 )
                 self.set_status(msg if success else f"Compose down failed: {msg}")
                 self.refresh_data()
@@ -2990,7 +3001,10 @@ class ContainerDashboard:
             ):
                 self.set_status(f"Building compose project '{row['project']}'...")
                 success, msg = self.client.run_compose_cmd(
-                    row["project"], row.get("config_file", ""), ComposeAction.BUILD.value
+                    row["project"],
+                    row.get("config_file", ""),
+                    ComposeAction.BUILD.value,
+                    working_dir=row.get("working_dir") or None,
                 )
                 self.set_status(msg if success else f"Compose build failed: {msg}")
                 self.refresh_data()
