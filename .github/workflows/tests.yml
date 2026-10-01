@@ -139,9 +139,11 @@ jobs:
         run: ruff check .
 
       - name: Run ruff format check
+        if: always()
         run: ruff format --check .
 
       - name: Run mypy
+        if: always()
         run: mypy
 
       - name: Prepare formatting diagnostic patch
