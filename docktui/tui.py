@@ -1021,7 +1021,11 @@ class ContainerDashboard:
             return
 
         if self.refresh_error:
-            age = f"{max(0, time.time() - self.last_refresh):.0f}s old" if self.last_refresh else "unavailable"
+            age = (
+                f"{max(0, time.time() - self.last_refresh):.0f}s old"
+                if self.last_refresh
+                else "unavailable"
+            )
             print(truncate(f"STALE ({age}): {self.refresh_error}", width))
         self._draw_tab_header(width)
         self._list_clipped = None

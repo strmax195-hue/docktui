@@ -279,7 +279,9 @@ def cmd_check(args: argparse.Namespace, config: Config) -> int:
     except (DockerError, subprocess.SubprocessError, OSError) as exc:
         if not args.quiet:
             if args.json:
-                print(json.dumps({"status": "UNKNOWN", "exit_code": EXIT_UNKNOWN, "error": str(exc)}))
+                print(
+                    json.dumps({"status": "UNKNOWN", "exit_code": EXIT_UNKNOWN, "error": str(exc)})
+                )
             else:
                 print(f"DOCKTUI UNKNOWN - {exc}")
         return EXIT_UNKNOWN
