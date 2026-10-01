@@ -4,61 +4,91 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'docktui/**'
+      - 'pyproject.toml'
+      - 'scripts/validate_release.py'
+      - 'tests/**'
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build package
+  tests:
+    name: Test release source
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: pytest tests/
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
 
-      - name: Install build tools
-        run: python -m pip install --upgrade build twine
-
-      - name: Build distributions
-        run: python -m build
-
-      - name: Check distributions
-        run: python -m twine check dist/*
-
-      - name: Verify tag matches package version
-        if: github.event_name == 'release'
+  build:
+    name: Build and verify distributions
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Verify wheel and install in clean environment
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          version=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"(.+?)\"', pathlib.Path('docktui/__init__.py').read_text()).group(1))")
-          tag="${GITHUB_REF_NAME#v}"
-          echo "package=$version tag=$tag"
-          test "$version" = "$tag"
-
-      - name: Upload dist artifacts
-        uses: actions/upload-artifact@v7
+          if [ -n "$RELEASE_TAG" ]; then
+            python scripts/validate_release.py --tag "$RELEASE_TAG"
+          else
+            python scripts/validate_release.py
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: python-package-distributions
           path: dist/
+          if-no-files-found: error
 
   attach:
-    name: Attach wheel to GitHub release
+    name: Attach verified distributions
     if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: python-package-distributions
           path: dist/
-
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  pypi:
+    name: Publish verified distributions to PyPI
+    if: github.event_name == 'release' && vars.ENABLE_PYPI_PUBLISH == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/docktui
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: python-package-distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1

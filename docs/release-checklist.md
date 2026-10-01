@@ -1,34 +1,21 @@
 # Release checklist
 
-Use this checklist when preparing a GitHub release.
+1. Review and merge the improvement PRs and confirm platform/Docker CI.
+2. Inspect the published history: v1.4.0 is the latest published release;
+   the next planned source release is v1.5.0.
+3. Set `docktui/__init__.py` version and date the matching CHANGELOG section.
+4. Run `pytest`, `ruff check .`, `ruff format --check .`, and `mypy`.
+5. Run `python -m build`, `python -m twine check dist/*`, and
+   `python scripts/validate_release.py --tag v1.5.0`. This installs the wheel
+   outside the checkout and exercises both CLI entrypoints.
+6. Review the concrete release/tag before creating it; a PR does not publish.
+7. Create the matching tag and GitHub release, then confirm the single Release
+   pipeline succeeds and attaches the verified wheel and sdist.
+8. Enable optional PyPI publishing only after the setup in
+   [publishing.md](publishing.md) is verified. Both upload jobs consume the
+   same artifacts and cannot run after a version mismatch.
+9. Update README wheel links and install instructions only after upload succeeds.
 
-1. Update `__version__` in `docktui/__init__.py` (the only place the version lives; `pyproject.toml` reads it).
-2. Update `CHANGELOG.md` with the release date and highlights.
-3. Run tests:
-
-   ```bash
-   pytest
-   ruff check . && ruff format --check .
-   mypy
-   ```
-
-4. Build and check the package:
-
-   ```bash
-   python -m pip install -e ".[dev]"
-   python -m build
-   python -m twine check dist/*
-   ```
-
-5. Commit the release changes.
-6. Create and push a tag:
-
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-
-7. Create a GitHub release from the tag and paste the matching changelog section.
-8. Confirm the `Release` workflow succeeds: it fails if the tag does not match `__version__`, and attaches the wheel and sdist to the GitHub release.
-
-PyPI publishing is optional. If you decide to publish later, use `docs/publishing.md`.
+Dependabot #12–14 are superseded by the SHA-pinned CodeQL v4, checkout v7 and
+setup-python v7 updates in the release pipeline PR; close those PRs after this
+workflow's CI confirms the replacements.
