@@ -67,7 +67,7 @@ pipx install git+https://github.com/strmax195-hue/docktui.git
 pip install git+https://github.com/strmax195-hue/docktui.git
 
 # A specific release wheel (see the Releases page for the file name)
-pip install https://github.com/strmax195-hue/docktui/releases/download/v1.4.0/docktui-1.4.0-py3-none-any.whl
+pip install https://github.com/strmax195-hue/docktui/releases/download/v1.5.0/docktui-1.5.0-py3-none-any.whl
 ```
 
 Air-gapped host? Download the `.whl` from [Releases](https://github.com/strmax195-hue/docktui/releases), copy it over, and `pip install docktui-*.whl` — there is nothing else to fetch.

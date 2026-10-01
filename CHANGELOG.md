@@ -2,9 +2,9 @@
 
 All notable changes to DockTUI are documented here.
 
-## [1.5.0] - 2026-10-01 (source in main)
+## [1.5.0] - 2026-10-01
 
-The v1.5.0 changes were merged into `main` in [PR #26](https://github.com/strmax195-hue/docktui/pull/26). This date records source availability; the v1.5.0 tag and GitHub Release artifacts have not been published yet. The latest published release remains [v1.4.0](https://github.com/strmax195-hue/docktui/releases/tag/v1.4.0).
+Published as [v1.5.0](https://github.com/strmax195-hue/docktui/releases/tag/v1.5.0), with a verified wheel and source distribution. The changes were merged into `main` in [PR #26](https://github.com/strmax195-hue/docktui/pull/26).
 
 A release focused on people who run Docker hosts: scriptable health checks, diagnostics, and fixing dashboard features that did not work as documented.
 

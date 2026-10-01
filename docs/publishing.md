@@ -1,9 +1,10 @@
 # Package publishing
 
-Install the published v1.4.0 wheel from GitHub Releases or use the GitHub
-checkout instructions in README. The v1.5.0 source was merged into `main` on
-2026-10-01 ([PR #26](https://github.com/strmax195-hue/docktui/pull/26)); its tag
-and GitHub Release artifacts are still pending. Do not recommend
+Install the published [v1.5.0 wheel](https://github.com/strmax195-hue/docktui/releases/tag/v1.5.0)
+from GitHub Releases or use the GitHub checkout instructions in README.
+The release was published on 2026-10-01 with a verified wheel and source
+distribution, following the merge of [PR #26](https://github.com/strmax195-hue/docktui/pull/26).
+Do not recommend
 `pipx install docktui` until the PyPI project and publisher
 are verified. PyPI availability and account ownership could not be checked in
 this execution environment.
