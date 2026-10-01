@@ -128,4 +128,3 @@ jobs:
         with:
           name: formatting-diagnostic
           path: /tmp/docktui-format.patch
-

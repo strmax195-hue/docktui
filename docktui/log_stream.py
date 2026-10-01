@@ -1,22 +1,22 @@
-"""Background line-streaming utility used by logs, pull progress, etc.
+"""Bounded subprocess streams with explicit, exactly-once completion."""
 
-Centralizes the threading + buffering boilerplate that the dashboard needs
-for any long-running `docker` invocation that produces output incrementally.
-"""
-
+import os
+import signal
 import subprocess
 import threading
+from collections import deque
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 
+@dataclass(frozen=True)
+class StreamResult:
+    returncode: int
+    cancelled: bool = False
+    error: str = ""
+
+
 class LineStreamer:
-    """Run a subprocess and stream its stdout lines to a thread-safe buffer.
-
-    A `LineStreamer` can be reused by views that want background updates
-    (log follow, image pull progress) and stopped cleanly when the user
-    navigates away.
-    """
-
     def __init__(
         self,
         cmd: list[str],
@@ -24,17 +24,24 @@ class LineStreamer:
         on_stop: Optional[Callable[[], None]] = None,
         text: bool = True,
         env: Optional[dict[str, str]] = None,
+        max_lines: int = 500,
+        on_complete: Optional[Callable[[StreamResult], None]] = None,
     ) -> None:
         self.cmd = cmd
         self.on_line = on_line
         self.on_stop = on_stop
+        self.on_complete = on_complete
         self.text = text
         self.env = dict(env) if env is not None else None
         self._process: Optional[subprocess.Popen] = None
         self._threads: list[threading.Thread] = []
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
-        self._lines: list[str] = []
+        self._lines: deque[str] = deque(maxlen=max(1, max_lines))
+        self._completed = False
+        self._cancelled = False
+        self._owns_group = False
+        self.result: Optional[StreamResult] = None
 
     @property
     def lines(self) -> list[str]:
@@ -45,11 +52,22 @@ class LineStreamer:
         return self._process is not None and self._process.poll() is None
 
     def start(self) -> Optional[str]:
-        """Spawn the subprocess and reader threads. Returns an error string on failure."""
         if self.is_running():
             return None
+        if self._process is not None:
+            self.stop()
+        self._stop_event.clear()
+        self._completed = False
+        self._cancelled = False
+        self.result = None
+        self._lines.clear()
+        options: dict = {}
+        if os.name == "posix":
+            options["start_new_session"] = True
+        elif os.name == "nt":
+            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
         try:
-            self._process = subprocess.Popen(
+            process = subprocess.Popen(
                 self.cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -58,17 +76,21 @@ class LineStreamer:
                 errors="replace" if self.text else None,
                 bufsize=1,
                 env=self.env,
+                **options,
             )
         except (OSError, ValueError) as exc:
             return f"Error starting stream: {exc}"
-
-        self._stop_event.clear()
-        for stream in (self._process.stdout, self._process.stderr):
-            if stream is None:
-                continue
-            thread = threading.Thread(target=self._reader, args=(stream,), daemon=True)
-            thread.start()
-            self._threads.append(thread)
+        self._process = process
+        self._owns_group = True
+        readers = []
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                thread = threading.Thread(target=self._reader, args=(stream,), daemon=True)
+                readers.append(thread)
+                thread.start()
+        waiter = threading.Thread(target=self._wait, args=(process, readers), daemon=True)
+        self._threads = readers + [waiter]
+        waiter.start()
         return None
 
     def _reader(self, stream) -> None:
@@ -76,38 +98,75 @@ class LineStreamer:
             for raw in stream:
                 if self._stop_event.is_set():
                     break
-                if raw is None:
-                    break
-                line = raw.rstrip("\n")
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", errors="replace")
+                line = raw.rstrip("\r\n")[:16384]
                 with self._lock:
                     self._lines.append(line)
                 if self.on_line is not None:
-                    try:
-                        self.on_line(line)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    self.on_line(line)
+        except (OSError, ValueError):
+            pass  # Pipes may close during cancellation.
+        finally:
+            stream.close()
+
+    def _wait(self, process: subprocess.Popen, readers: list[threading.Thread]) -> None:
+        code = process.wait()
+        for thread in readers:
+            thread.join(timeout=1.0)
+        if any(thread.is_alive() for thread in readers):
+            self._signal_process(process, kill=True)
+            for thread in readers:
+                thread.join(timeout=1.0)
+        self._finish(StreamResult(code, self._cancelled))
+
+    def _finish(self, result: StreamResult) -> None:
+        with self._lock:
+            if self._completed:
+                return
+            self._completed = True
+            self.result = result
+        if self.on_complete is not None:
+            self.on_complete(result)
+        if self.on_stop is not None:
+            self.on_stop()
+
+    def _signal_process(self, process: subprocess.Popen, kill: bool = False) -> None:
+        if self._owns_group and os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL if kill else signal.SIGTERM)
+                return
+            except ProcessLookupError:
+                return
+        if kill:
+            process.kill()
+        else:
+            process.terminate()
 
     def stop(self, timeout: float = 0.2) -> None:
-        """Terminate the subprocess and join reader threads."""
-        self._stop_event.set()
         process = self._process
-        if process is not None:
+        if process is None:
+            return
+        if process.poll() is None:
+            self._cancelled = True
+            self._stop_event.set()
             try:
-                process.terminate()
+                self._signal_process(process)
                 process.wait(timeout=timeout)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
+            except subprocess.TimeoutExpired:
+                self._signal_process(process, kill=True)
+                process.wait(timeout=max(timeout, 1.0))
+            except ProcessLookupError:
+                pass
+        if self._owns_group and os.name == "posix":
+            self._signal_process(process, kill=True)
         for thread in self._threads:
-            thread.join(timeout=timeout)
+            if thread is not threading.current_thread():
+                thread.join(timeout=max(timeout, 1.0))
+        code = process.poll()
+        self._finish(StreamResult(code if isinstance(code, int) else -1, self._cancelled))
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
         self._threads = []
         self._process = None
-        if self.on_stop is not None:
-            try:
-                self.on_stop()
-            except Exception:
-                pass

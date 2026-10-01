@@ -32,7 +32,7 @@ from .dialogs import DialogResult, apply_dialog_key
 from .docker_client import DockerClient
 from .enums import ComposeAction, StateFilter, ThemeName, ViewMode
 from .keymap import Keymap, resolve_hotkey_overlay
-from .log_stream import LineStreamer
+from .log_stream import LineStreamer, StreamResult
 from .screen import (
     clear_screen,
     draw_frame,
@@ -1858,16 +1858,24 @@ class ContainerDashboard:
 
         def on_line(line: str) -> None:
             self.pull_lines.append(line)
+            del self.pull_lines[:-self.config.log_max]
             self.need_redraw = True
 
-        def on_stop() -> None:
-            self.set_status(f"Pull of {repo} finished.")
-            self.refresh_data()
+        def on_complete(result: StreamResult) -> None:
+            if result.cancelled:
+                self.set_status(f"Pull of {repo} canceled.")
+            elif result.returncode == 0:
+                self.set_status(f"Pull of {repo} finished.")
+                self.request_refresh()
+            else:
+                self.set_status(f"Pull of {repo} failed (exit {result.returncode}).")
+            self.need_redraw = True
 
         streamer = LineStreamer(
             self.client.pull_image_args(repo),
             on_line=on_line,
-            on_stop=on_stop,
+            on_complete=on_complete,
+            max_lines=self.config.log_max,
             env=self.client.command_env(),
         )
         err = streamer.start()
@@ -3128,6 +3136,8 @@ class ContainerDashboard:
                 time.sleep(0.04)
         finally:
             self.stop_log_stream()
+            if self.pull_streamer is not None:
+                self.pull_streamer.stop()
             self.stop_refresh_worker()
             self.disable_mouse_tracking()
             restore_terminal()
