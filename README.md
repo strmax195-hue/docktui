@@ -349,6 +349,8 @@ Start with **`docktui doctor`** — it checks every item below and prints the fi
 | Colors look wrong / you want none | `--theme light`, `--theme high-contrast`, or `--no-color` (`NO_COLOR=1`). |
 | Commands time out on a slow host | Increase `--docker-timeout` (or `docker_timeout` in the config). |
 
+Streaming buffers are bounded (500 lines by default; pull progress follows `log_max`). Completion distinguishes success, failure, and cancellation. On Unix, canceled streams also terminate their process group, including SSH helpers.
+
 ## How it works
 
 DockTUI wraps the `docker` CLI via `subprocess`, so your existing configuration, permissions and security context are preserved without an SDK or a privileged helper. Input is read non-blockingly with `msvcrt` on Windows and `termios`/`select` on Unix.
