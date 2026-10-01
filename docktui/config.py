@@ -78,6 +78,19 @@ class Config:
         if self.hotkey_overlays is None:
             self.hotkey_overlays = {}
 
+    def resolve_host(self, explicit: Optional[str] = None) -> Optional[str]:
+        """Explicit host, Docker environment, configured endpoint, then context."""
+        if explicit:
+            return explicit
+        if os.environ.get("DOCKER_CONTEXT") or os.environ.get("DOCKER_HOST"):
+            return None
+        if self.active_endpoint:
+            for endpoint in self.endpoints:
+                if endpoint.get("name") == self.active_endpoint and endpoint.get("host"):
+                    return endpoint["host"]
+            raise ValueError(f"Unknown or invalid active endpoint: {self.active_endpoint}")
+        return None
+
     # ------------------------------------------------------------------ load/save
 
     @classmethod
