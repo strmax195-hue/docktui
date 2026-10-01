@@ -392,3 +392,12 @@ If DockTUI saves you a few `docker ps` a day, a ⭐ on GitHub helps other admins
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Development module map
+
+`ContainerDashboard` coordinates state, actions and the input loop. Terminal
+input and restoration live in `docktui/terminal.py`; the `docktui/views/`
+package renders dashboard resources, logs, text screens and dialogs. Background
+operations use `jobs.py` and immutable connection snapshots. Log severity and
+highlight formatting live in `log_format.py`. Public dashboard methods remain
+available for integrations. Unix PTY tests cover quit, Ctrl+C and resize.

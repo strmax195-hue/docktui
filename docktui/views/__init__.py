@@ -1,0 +1,1 @@
+"""Dashboard rendering components."""
