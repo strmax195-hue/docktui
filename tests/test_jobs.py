@@ -117,25 +117,33 @@ class TestJobs(unittest.TestCase):
     def test_navigation_with_large_hosts_and_real_ten_second_command(self):
         import sys
         from unittest.mock import patch
+
         from docktui.config import Config
         from docktui.docker_client import DockerClient
         from docktui.jobs import run_cancellable
         from docktui.tui import ContainerDashboard
 
         def slow(client, *args):
-            return run_cancellable([sys.executable, '-c', 'import time;time.sleep(10)'], client.cancel_event, capture_output=True, timeout=15).stdout
+            return run_cancellable(
+                [sys.executable, "-c", "import time;time.sleep(10)"],
+                client.cancel_event,
+                capture_output=True,
+                timeout=15,
+            ).stdout
 
         for size in (100, 1000):
             with self.subTest(containers=size):
-                d = ContainerDashboard(config=Config(hotkey_overlays={"ctrl+l":"slow"}))
-                d.containers = [{"id":str(i), "name":f"c{i}", "state":"running"} for i in range(size)]
+                d = ContainerDashboard(config=Config(hotkey_overlays={"ctrl+l": "slow"}))
+                d.containers = [
+                    {"id": str(i), "name": f"c{i}", "state": "running"} for i in range(size)
+                ]
                 d._running = True
                 try:
-                    with patch.object(DockerClient, 'exec_command', slow):
+                    with patch.object(DockerClient, "exec_command", slow):
                         started = time.monotonic()
-                        d._handle_key_main('\x0c')
-                        d._handle_key_main('down')
-                        self.assertLess(time.monotonic()-started, .15)
+                        d._handle_key_main("\x0c")
+                        d._handle_key_main("down")
+                        self.assertLess(time.monotonic() - started, 0.15)
                         self.assertEqual(d.selected_index, 1)
                         d.jobs.cancel_all()
                         self.assertTrue(d.jobs.wait_idle(2))

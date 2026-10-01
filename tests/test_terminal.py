@@ -69,6 +69,7 @@ class TestTerminal(unittest.TestCase):
 
     def test_interrupt_handler_requests_quit_without_raising_and_restores_signal(self):
         from docktui import terminal
+
         before = signal.getsignal(signal.SIGINT)
         called = []
         with terminal.interrupt_handler(lambda: called.append(True)):
@@ -81,8 +82,13 @@ class TestTerminal(unittest.TestCase):
 class TestWindowsTerminal(unittest.TestCase):
     def test_keyboard_and_cleanup(self):
         from unittest.mock import patch
+
         from docktui import terminal
-        with patch.object(terminal.msvcrt, "kbhit", return_value=True), patch.object(terminal.msvcrt, "getch", side_effect=[b"\xe0", b"H", b"q"]):
+
+        with (
+            patch.object(terminal.msvcrt, "kbhit", return_value=True),
+            patch.object(terminal.msvcrt, "getch", side_effect=[b"\xe0", b"H", b"q"]),
+        ):
             self.assertEqual(terminal.get_key_nonblocking(), "up")
             self.assertEqual(terminal.get_key_nonblocking(), "q")
         with patch.object(terminal.os, "system"):
