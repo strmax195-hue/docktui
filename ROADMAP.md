@@ -70,8 +70,8 @@ The implementation plan is in [docs/superpowers/plans/2026-10-01-docktui-improve
 
 - `docktui check --hosts prod,stage`: check several endpoints in one run.
 - Prometheus text-format output for `status` (node_exporter textfile collector).
-- Container events feed (`docker events`) in the dashboard: OOM kills, restarts, health changes.
-- Show healthcheck log (last probe output) in the Details view.
+- [x] Container events feed in Details: OOM kills, restarts, health changes.
+- [x] Show last healthcheck probe output in Details.
 - Log view: `--since` time windows and saving highlight presets per container.
 - Publish to PyPI and Homebrew for one-command installs.
 
