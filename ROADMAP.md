@@ -68,8 +68,8 @@ The implementation plan is in [docs/superpowers/plans/2026-10-01-docktui-improve
 
 ## Next (ideas — feedback welcome)
 
-- `docktui check --hosts prod,stage`: check several endpoints in one run.
-- Prometheus text-format output for `status` (node_exporter textfile collector).
+- [x] `docktui check --hosts prod,stage`: independent bounded checks.
+- [x] Prometheus output for `status` with freshness/error metrics.
 - [x] Container events feed in Details: OOM kills, restarts, health changes.
 - [x] Show last healthcheck probe output in Details.
 - [x] Log time windows, timestamps and container/service highlight presets.

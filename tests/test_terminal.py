@@ -53,7 +53,13 @@ class TestTerminal(unittest.TestCase):
                         if select.select([master], [], [], 0.05)[0]:
                             output += os.read(master, 65536)
                     self.assertEqual(process.wait(timeout=1), 0, output.decode(errors="replace"))
-                    self.assertEqual(termios.tcgetattr(slave), before)
+                    after = termios.tcgetattr(slave)
+                    # Darwin sets kernel-managed PENDIN when restoring canonical
+                    # input. It does not change the user-visible terminal modes.
+                    pending = getattr(termios, "PENDIN", 0)
+                    before[3] &= ~pending
+                    after[3] &= ~pending
+                    self.assertEqual(after, before)
                 finally:
                     if process.poll() is None:
                         process.kill()

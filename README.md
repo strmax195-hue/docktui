@@ -433,3 +433,35 @@ presets are selected by container name, then Compose service, then project:
 
 Target keys also accept `container:web-1` and `project:app`; global
 `log_highlights` remains the fallback. `H` toggles the selected patterns.
+
+### Prometheus textfile collector
+
+```bash
+docktui status --prometheus --metrics-limit 1000 > docktui.prom.tmp
+mv docktui.prom.tmp docktui.prom
+```
+
+Metrics include collection success, successful collection Unix time in seconds,
+selected container count, running/unhealthy gauges, CPU and memory ratios
+(percent divided by 100). CPU ratios may exceed 1 on multicore hosts. Missing
+metrics are omitted. Failure exits 1 and emits success=0 without container
+samples. Replace the textfile atomically, including failure output, and alert
+on collection_success and timestamp age. Labels use endpoint and container
+name, with escaping and a 128-character cap (hash suffix for long values).
+Per-container cardinality is capped by metrics-limit (1..10000); a truncation
+gauge reports the cap. Arbitrary Docker labels and image tags are excluded.
+
+### Checking several endpoints
+
+```bash
+docktui check --hosts prod,stage --workers 4 --host-timeout 10 --json
+```
+
+Names come from configured endpoints. Up to 64 names are accepted, duplicates
+are checked once, concurrency is capped at 16, and each worker receives a
+frozen connection environment and a total host deadline across commands.
+JSON keeps each endpoint's status, rows, findings, duration and error. One
+failure does not prevent checks of other hosts, including unknown names.
+Aggregate priority is CRITICAL > UNKNOWN > WARNING > OK, retaining Nagios
+codes 2/3/1/0. Single-host commands keep their codes. --hosts and --host
+cannot be combined.

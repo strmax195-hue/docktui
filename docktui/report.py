@@ -8,6 +8,7 @@ jobs, and monitoring systems (Nagios / Icinga / Zabbix / Sensu exit codes).
 
 import fnmatch
 import json
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -57,7 +58,8 @@ def parse_percent(value: Any) -> Optional[float]:
         return None
     text = str(value).strip().rstrip("%").strip()
     try:
-        return float(text)
+        number = float(text)
+        return number if math.isfinite(number) else None
     except ValueError:
         return None
 
@@ -181,7 +183,7 @@ def evaluate(
 
 
 def overall_level(findings: list[Finding]) -> int:
-    return max((f.level for f in findings), default=EXIT_OK)
+    return aggregate_levels([f.level for f in findings])
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -297,3 +299,9 @@ def format_table(
         f"{summary['unhealthy']} unhealthy"
     )
     return "\n".join(lines)
+
+
+def aggregate_levels(levels: Sequence[int]) -> int:
+    """CRITICAL takes priority, then UNKNOWN, WARNING and OK."""
+    priority = {EXIT_OK: 0, EXIT_WARNING: 1, EXIT_UNKNOWN: 2, EXIT_CRITICAL: 3}
+    return max(levels, key=lambda level: priority[level], default=EXIT_OK)
