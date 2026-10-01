@@ -75,3 +75,16 @@ class TestTerminal(unittest.TestCase):
             signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
         self.assertEqual(called, [True])
         self.assertEqual(signal.getsignal(signal.SIGINT), before)
+
+
+@unittest.skipUnless(os.name == "nt", "native Windows keyboard lifecycle")
+class TestWindowsTerminal(unittest.TestCase):
+    def test_keyboard_and_cleanup(self):
+        from unittest.mock import patch
+        from docktui import terminal
+        with patch.object(terminal.msvcrt, "kbhit", return_value=True), patch.object(terminal.msvcrt, "getch", side_effect=[b"\xe0", b"H", b"q"]):
+            self.assertEqual(terminal.get_key_nonblocking(), "up")
+            self.assertEqual(terminal.get_key_nonblocking(), "q")
+        with patch.object(terminal.os, "system"):
+            terminal.init_terminal()
+            terminal.restore_terminal()
