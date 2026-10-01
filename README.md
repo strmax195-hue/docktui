@@ -140,6 +140,8 @@ command[check_docker]=/usr/local/bin/docktui check --mem-warn 90 --require 'app-
 docker compose up -d && sleep 20 && docktui check --filter myproject --require 'myproject-web-*'
 ```
 
+**Collection errors:** `check` returns UNKNOWN (3) when Docker data cannot be collected, or requested CPU/memory metrics are missing. `status` exits with 1; with `--json`, failures produce an object containing `status`, `exit_code`, and `error` (successful output remains an array). The dashboard marks its last successful snapshot as stale instead of silently emptying the list.
+
 ### `docktui doctor` — "why doesn't it work?"
 
 <p align="center">

@@ -53,6 +53,19 @@ This roadmap focuses DockTUI on lightweight local Docker workflows while keeping
 - Scrollable dashboard lists for large hosts; reliable keyboard input on Unix.
 - Bulk start/stop, custom hotkeys and pinned panes wired up for real.
 
+## Reliability improvements
+
+- [x] Distinguish failed Docker collection from an empty successful result; preserve stale dashboard snapshots and return UNKNOWN for failed health checks.
+- [ ] Apply the selected connection to every subprocess.
+- [ ] Correct Compose argument ordering and validate config paths.
+- [ ] Bound streaming buffers and reliably finish background processes.
+- [ ] Keep TUI navigation responsive during slow operations.
+- [ ] Split terminal I/O and view rendering from the dashboard coordinator.
+- [ ] Save and validate configuration safely; strengthen CI.
+- [ ] Publish one tested package artifact through a single release pipeline.
+
+The implementation plan is in [docs/superpowers/plans/2026-10-01-docktui-improvements.md](docs/superpowers/plans/2026-10-01-docktui-improvements.md).
+
 ## Next (ideas — feedback welcome)
 
 - `docktui check --hosts prod,stage`: check several endpoints in one run.

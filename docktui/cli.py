@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -20,7 +21,7 @@ from typing import Any, Optional
 from . import __version__
 from .config import Config
 from .constants import AVAILABLE_THEMES
-from .docker_client import DockerClient
+from .docker_client import DockerClient, DockerError
 from .tui import ContainerDashboard
 
 
@@ -220,7 +221,14 @@ def _collect_rows(client: DockerClient, args: argparse.Namespace, with_stats: bo
 
     containers = select_containers(client.list_containers(), args.filter, args.exclude)
     stats = client.get_container_stats() if with_stats and containers else {}
-    return build_rows(containers, stats)
+    rows = build_rows(containers, stats)
+    for row in rows:
+        if row["state"] != "running":
+            continue
+        for option, field in (("cpu_warn", "cpu_percent"), ("mem_warn", "mem_percent")):
+            if getattr(args, option, None) is not None and row[field] is None:
+                raise DockerError(f"Missing {field} for {row['name']}")
+    return rows
 
 
 def cmd_status(args: argparse.Namespace, config: Config) -> int:
@@ -233,7 +241,14 @@ def cmd_status(args: argparse.Namespace, config: Config) -> int:
     if not client.is_daemon_running():
         print("docktui: cannot reach the Docker daemon. Run `docktui doctor`.", file=sys.stderr)
         return 1
-    rows = _collect_rows(client, args, with_stats=not args.no_stats)
+    try:
+        rows = _collect_rows(client, args, with_stats=not args.no_stats)
+    except (DockerError, subprocess.SubprocessError, OSError) as exc:
+        if args.json:
+            print(json.dumps({"status": "UNKNOWN", "exit_code": 1, "error": str(exc)}))
+        else:
+            print(f"docktui: {exc}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(rows, indent=2))
     else:
@@ -259,7 +274,15 @@ def cmd_check(args: argparse.Namespace, config: Config) -> int:
                 print(f"DOCKTUI UNKNOWN - {reason}")
         return EXIT_UNKNOWN
     needs_stats = args.cpu_warn is not None or args.mem_warn is not None
-    rows = _collect_rows(client, args, with_stats=needs_stats)
+    try:
+        rows = _collect_rows(client, args, with_stats=needs_stats)
+    except (DockerError, subprocess.SubprocessError, OSError) as exc:
+        if not args.quiet:
+            if args.json:
+                print(json.dumps({"status": "UNKNOWN", "exit_code": EXIT_UNKNOWN, "error": str(exc)}))
+            else:
+                print(f"DOCKTUI UNKNOWN - {exc}")
+        return EXIT_UNKNOWN
     findings = evaluate(
         rows, cpu_warn=args.cpu_warn, mem_warn=args.mem_warn, require_running=args.require
     )

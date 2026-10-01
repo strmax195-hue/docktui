@@ -10,6 +10,10 @@ def _format_timeout_message(seconds: float, action: str) -> str:
     return f"Timed out {action} after {seconds:g} seconds."
 
 
+class DockerError(RuntimeError):
+    """Docker could not provide a trustworthy result."""
+
+
 class DockerClient:
     """Interacts with the Docker daemon via the Docker CLI command line."""
 
@@ -118,6 +122,16 @@ class DockerClient:
         return parsed
 
     # ------------------------------------------------------------------ subprocess
+
+    def _error_message(self, exc: Exception) -> str:
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return _format_timeout_message(self.timeout, "collecting Docker data")
+        if isinstance(exc, subprocess.CalledProcessError):
+            detail = exc.stderr or exc.stdout
+            if isinstance(detail, bytes):
+                detail = detail.decode("utf-8", errors="replace")
+            return str(detail).strip() if detail else str(exc)
+        return str(exc)
 
     def _run(self, cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
         """Run a Docker CLI command with default timeout and per-instance env."""
@@ -247,7 +261,7 @@ class DockerClient:
 
     def list_containers(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
-            return []
+            raise DockerError("Docker CLI not found.")
 
         cmd = [
             self.docker_bin,
@@ -259,8 +273,8 @@ class DockerClient:
 
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
 
         containers: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
@@ -288,7 +302,7 @@ class DockerClient:
 
     def get_container_stats(self) -> dict[str, dict[str, str]]:
         if not self.is_docker_installed():
-            return {}
+            raise DockerError("Docker CLI not found.")
 
         cmd = [
             self.docker_bin,
@@ -300,8 +314,8 @@ class DockerClient:
 
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return {}
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
 
         stats: dict[str, dict[str, str]] = {}
         for line in res.stdout.strip().split("\n"):
@@ -448,7 +462,7 @@ class DockerClient:
 
     def list_contexts(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
-            return []
+            raise DockerError("Docker CLI not found.")
         cmd = [
             self.docker_bin,
             "context",
@@ -458,8 +472,8 @@ class DockerClient:
         ]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
         contexts: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
@@ -600,7 +614,7 @@ class DockerClient:
 
     def list_images(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
-            return []
+            raise DockerError("Docker CLI not found.")
         cmd = [
             str(self.docker_bin),
             "images",
@@ -609,8 +623,8 @@ class DockerClient:
         ]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
         images: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
@@ -640,7 +654,7 @@ class DockerClient:
     def search_images(self, query: str, limit: int = 25) -> list[dict[str, str]]:
         """Search Docker Hub (or the configured registry) for `query`."""
         if not self.is_docker_installed():
-            return []
+            raise DockerError("Docker CLI not found.")
         query = (query or "").strip()
         if not query:
             return []
@@ -655,8 +669,8 @@ class DockerClient:
         ]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
         results: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
@@ -704,12 +718,12 @@ class DockerClient:
 
     def list_volumes(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
-            return []
+            raise DockerError("Docker CLI not found.")
         cmd = [str(self.docker_bin), "volume", "ls", "--format", "{{.Name}}|{{.Driver}}|{{.Scope}}"]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
         volumes: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
@@ -766,7 +780,7 @@ class DockerClient:
         across local and remote daemons.
         """
         if not self.is_docker_installed():
-            return []
+            raise DockerError("Docker CLI not found.")
         target = path if path.startswith("/") else "/" + path
         cmd = [
             self.docker_bin,
@@ -781,8 +795,8 @@ class DockerClient:
         ]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
         entries: list[dict[str, str]] = []
         for line in res.stdout.splitlines():
             line = line.rstrip()
@@ -808,7 +822,7 @@ class DockerClient:
 
     def list_networks(self) -> list[dict[str, str]]:
         if not self.is_docker_installed():
-            return []
+            raise DockerError("Docker CLI not found.")
         cmd = [
             self.docker_bin,
             "network",
@@ -818,8 +832,8 @@ class DockerClient:
         ]
         try:
             res = self._run(cmd, capture_output=True, text=True, check=True, encoding="utf-8")  # type: ignore
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
         networks: list[dict[str, str]] = []
         for line in res.stdout.strip().split("\n"):
             if not line:
