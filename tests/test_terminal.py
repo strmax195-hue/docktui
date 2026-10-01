@@ -66,3 +66,12 @@ class TestTerminal(unittest.TestCase):
                         process.wait()
                     os.close(master)
                     os.close(slave)
+
+    def test_interrupt_handler_requests_quit_without_raising_and_restores_signal(self):
+        from docktui import terminal
+        before = signal.getsignal(signal.SIGINT)
+        called = []
+        with terminal.interrupt_handler(lambda: called.append(True)):
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+        self.assertEqual(called, [True])
+        self.assertEqual(signal.getsignal(signal.SIGINT), before)

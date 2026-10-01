@@ -35,7 +35,11 @@ class TestLogWindows(unittest.TestCase):
         client.docker_bin = "docker"
         for project in (None, "app"):
             cmd = client.logs_command(
-                "id", project, since="1h", until="2026-10-01T00:00:00Z" if project is None else "", timestamps=True
+                "id",
+                project,
+                since="1h",
+                until="2026-10-01T00:00:00Z" if project is None else "",
+                timestamps=True,
             )
             self.assertIn("--since=1h", cmd)
             if project is None:

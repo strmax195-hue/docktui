@@ -124,7 +124,10 @@ class LineStreamer:
             self._signal_process(process, kill=True)
             for thread in readers:
                 thread.join(timeout=1.0)
+        if self._owns_group and os.name == "posix":
+            self._signal_process(process, kill=True)
         close_windows_tree(self._take_windows_owner())
+        self._owns_group = False
         self._finish(StreamResult(code, self._cancelled))
 
     def _finish(self, result: StreamResult) -> None:

@@ -5,8 +5,8 @@ state, jobs, and modal input flow. Terminal input lives in `terminal`;
 rendering lives in `views`, with shared helpers in `styles` and `screen`.
 """
 
-import os
 import hashlib
+import os
 import re
 import shlex
 import subprocess
@@ -242,6 +242,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.pinned_project: Optional[str] = None
         self._list_clipped: Optional[tuple[int, int, int]] = None
         self._quit_requested = False
+        self._blocking_prompt = False
         self._running = False
         self.jobs = JobRunner()
         self._view_requests: dict[str, str] = {}
@@ -409,6 +410,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
     def prompt_user(self, prompt_text: str) -> str:
         """Blocking prompt used for legacy y/n confirmations."""
         print(f"\r\033[K{YELLOW}{BOLD}{prompt_text}{RESET}", end="", flush=True)
+        self._blocking_prompt = True
         try:
             if PLATFORM == "windows":
                 while _terminal.msvcrt.kbhit():  # type: ignore[attr-defined]
@@ -417,6 +419,8 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                 return input().strip()
         except Exception:
             return ""
+        finally:
+            self._blocking_prompt = False
 
     # ------------------------------------------------------------- export
 
@@ -765,6 +769,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.jobs.drain(self.client.connection_generation)
         if (
             self.events_enabled
+            and not self.event_feed.deleted
             and self.event_streamer is None
             and time.monotonic() >= self._event_retry_at
         ):
@@ -885,7 +890,11 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             return
 
         if key.startswith("view:"):
-            identity = hashlib.sha256(repr((method, args, kwargs, self.client.connection_generation, self._log_generation)).encode()).hexdigest()
+            identity = hashlib.sha256(
+                repr(
+                    (method, args, kwargs, self.client.connection_generation, self._log_generation)
+                ).encode()
+            ).hexdigest()
             if self._view_requests.get(key) != identity:
                 self.jobs.cancel_prefix(key + ":")
                 self._view_requests[key] = identity
@@ -1286,6 +1295,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             sel_ctx = self.contexts[self.selected_context_index]
             self.set_status(f"Switching Docker context to {sel_ctx['name']}...")
             name = sel_ctx["name"]
+
             def apply(result):
                 ok, message = result
                 if ok:
@@ -1296,6 +1306,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                     self.config.active_endpoint = None
                     self.refresh_data()
                 self.set_status(message)
+
             self._docker_job("action", "use_context", (name,), apply)
             return
         if self.endpoints:
@@ -1351,6 +1362,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.last_refresh = 0.0
             self.daemon_running = False
             self.last_daemon_check = 0.0
+
     # ------------------------------------------------------------- modal helpers
 
     def _start_filter_prompt(self, _key: str) -> None:
@@ -2273,7 +2285,16 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
     # ------------------------------------------------------------- main loop
 
+    def _handle_interrupt(self) -> None:
+        if self._blocking_prompt:
+            raise KeyboardInterrupt
+        self._request_quit()
+
     def run(self) -> None:
+        with _terminal.interrupt_handler(self._handle_interrupt):
+            self._run_loop()
+
+    def _run_loop(self) -> None:
         self._quit_requested = False
         self._running = True
         init_terminal()
@@ -2375,6 +2396,8 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             print(RESET)
 
     def _start_events(self) -> None:
+        if self.event_feed.deleted:
+            return
         if not self.active_container or not self.client.docker_bin:
             self.events_enabled = False
             return
@@ -2389,6 +2412,8 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         def receive(line: str) -> None:
             def apply() -> None:
                 if epoch == self._event_epoch and self.event_feed.append(line):
+                    if self.event_feed.deleted and self.event_streamer is not None:
+                        self.event_streamer.stop()
                     self.need_redraw = True
 
             self._post_ui(apply, generation, line=True)
@@ -2397,7 +2422,10 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             def apply() -> None:
                 if epoch == self._event_epoch:
                     self.event_streamer = None
-                    self.event_feed.disconnect(result.returncode)
+                    if self.event_feed.deleted:
+                        self.event_feed.status = "container removed"
+                    else:
+                        self.event_feed.disconnect(result.returncode)
                     if result.error:
                         self.event_feed.status += f": {result.error}"
                     self._event_retry_at = time.monotonic() + 2

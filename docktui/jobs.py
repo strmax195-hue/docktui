@@ -94,7 +94,9 @@ class JobRunner:
         self._executor.shutdown(wait=False)
 
 
-def run_cancellable(cmd: list[str], cancel: threading.Event, **kwargs) -> subprocess.CompletedProcess:
+def run_cancellable(
+    cmd: list[str], cancel: threading.Event, **kwargs
+) -> subprocess.CompletedProcess:
     """subprocess.run semantics with bounded waits and explicit cancellation."""
     check = kwargs.pop("check", False)
     timeout = kwargs.pop("timeout", None)
@@ -107,7 +109,7 @@ def run_cancellable(cmd: list[str], cancel: threading.Event, **kwargs) -> subpro
     if os.name == "posix":
         kwargs["start_new_session"] = True
     elif os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
     deadline = time.monotonic() + timeout if timeout is not None else None
     process = subprocess.Popen(cmd, **kwargs)
     owner = own_windows_tree(process)

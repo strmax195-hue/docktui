@@ -5,7 +5,7 @@ import os
 import signal
 from collections import deque
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 RESIZE_REQUESTED = False
 
@@ -181,3 +181,13 @@ except ImportError:  # Unix / macOS
         finally:
             if was_managed:
                 init_terminal()
+
+
+@contextlib.contextmanager
+def interrupt_handler(callback: Callable[[], None]) -> Iterator[None]:
+    """Request UI shutdown without interrupting Python thread/lock internals."""
+    previous = signal.signal(signal.SIGINT, lambda signum, frame: callback())
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
