@@ -72,7 +72,7 @@ The implementation plan is in [docs/superpowers/plans/2026-10-01-docktui-improve
 - Prometheus text-format output for `status` (node_exporter textfile collector).
 - [x] Container events feed in Details: OOM kills, restarts, health changes.
 - [x] Show last healthcheck probe output in Details.
-- Log view: `--since` time windows and saving highlight presets per container.
+- [x] Log time windows, timestamps and container/service highlight presets.
 - Publish to PyPI and Homebrew for one-command installs.
 
 ## Feedback wanted

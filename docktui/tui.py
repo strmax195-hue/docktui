@@ -174,6 +174,10 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.sort_mode = "default"
 
         # ---------------------------------------------------------------- logs
+        self._logs_loaded = False
+        self.log_since = self.config.log_since
+        self.log_until = self.config.log_until
+        self.log_timestamps = self.config.log_timestamps
         self.log_filter = ""
         self.log_search = ""
         self.log_match_index = 0
@@ -549,32 +553,22 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                     self._apply_log_text(raw, viewport_height, follow)
                     self.need_redraw = True
 
-            self._docker_job("view:logs", method, (target,), apply, tail=self.log_tail_limit)
+            self._docker_job("view:logs", method, (target,), apply, tail=self.log_tail_limit, **self._log_options())
             return
         if container_id is None and self.active_project:
             raw_logs = self.client.get_compose_project_logs(
-                self.active_project, tail=self.log_tail_limit
+                self.active_project, tail=self.log_tail_limit, **self._log_options()
             )
         else:
-            raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit)  # type: ignore
+            raw_logs = self.client.get_logs(container_id, tail=self.log_tail_limit, **self._log_options())  # type: ignore
         self._apply_log_text(raw_logs, viewport_height, follow)
 
     def _apply_log_text(self, raw_logs: str, viewport_height: int, follow: bool) -> None:
-        log_lines = raw_logs.split("\n")
-        if self.log_errors_only:
-            log_lines = [line for line in log_lines if _log_is_error_line(line)]
-            if not log_lines:
-                log_lines = [f"{YELLOW}(No error/warning lines in current log window){RESET}"]
-        if self.log_filter:
-            self.log_lines = [
-                line for line in log_lines if _log_matches_filter(line, self.log_filter)
-            ]
-            if not self.log_lines:
-                self.log_lines = [f"{YELLOW}(No logs match filter '{self.log_filter}'){RESET}"]
-        else:
-            self.log_lines = log_lines
-        if follow or self.log_scroll_index >= max(0, len(self.log_lines) - viewport_height - 1):
-            self.log_scroll_index = max(0, len(self.log_lines) - viewport_height)
+        self.log_lines = raw_logs.splitlines()[-self.config.log_max:]
+        self._logs_loaded = True
+        visible = self.visible_log_lines()
+        if follow or self.log_scroll_index >= max(0, len(visible) - viewport_height - 1):
+            self.log_scroll_index = max(0, len(visible) - viewport_height)
         self.last_log_refresh = time.time()
 
     def is_log_streaming(self) -> bool:
@@ -585,13 +579,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             return
         self.stop_log_stream()
 
-        cmd: list[str] = []
-        if self.client.docker_bin:
-            cmd.append(self.client.docker_bin)
-        if container_id is None and project_name:
-            cmd += ["compose", "-p", project_name, "logs", "-f", f"--tail={self.log_tail_limit}"]
-        else:
-            cmd += ["logs", "-f", f"--tail={self.log_tail_limit}", container_id]  # type: ignore
+        cmd = self.client.logs_command(container_id, project_name, tail=0, follow=True, **self._log_options())
 
         token = self._log_generation
         generation = self.client.connection_generation
@@ -611,13 +599,9 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.log_streamer = streamer
 
     def _on_log_line(self, line: str) -> None:
-        if self.log_errors_only and not _log_is_error_line(line):
-            return
-        if self.log_filter and not _log_matches_filter(line, self.log_filter):
-            return
         with self.data_lock:
             self.log_lines.append(line)
-            if len(self.log_lines) > self.log_tail_limit:
+            if len(self.log_lines) > self.config.log_max:
                 self.log_lines.pop(0)
             try:
                 height = get_terminal_size().height
@@ -626,7 +610,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                     viewport_h = self.split_viewport_height(height)
             except Exception:
                 viewport_h = 18
-            self.log_scroll_index = max(0, len(self.log_lines) - viewport_h)
+            self.log_scroll_index = max(0, len(self.visible_log_lines()) - viewport_h)
         self.need_redraw = True
 
     def stop_log_stream(self) -> None:
@@ -637,16 +621,16 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
     def jump_to_next_log_match(self, viewport_height: int) -> None:
         query = self.log_search or self.log_filter
-        if not query or not self.log_lines:
+        if not query or not self.visible_log_lines():
             self.set_status("Set a log search first with '/'.")
             return
-        matches = [idx for idx, line in enumerate(self.log_lines) if query.lower() in line.lower()]
+        matches = [idx for idx, line in enumerate(self.visible_log_lines()) if query.lower() in line.lower()]
         if not matches:
             self.set_status(f"No log matches for '{query}'.")
             return
         self.log_match_index = (self.log_match_index + 1) % len(matches)
         self.log_scroll_index = max(
-            0, min(matches[self.log_match_index], len(self.log_lines) - viewport_height)
+            0, min(matches[self.log_match_index], len(self.visible_log_lines()) - viewport_height)
         )
         self.log_follow = False
         self.set_status(f"Log match {self.log_match_index + 1}/{len(matches)}.")
@@ -1691,12 +1675,13 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if key in ("down", "scroll_down"):
             self.log_follow = False
             self.log_scroll_index = max(
-                0, min(self.log_scroll_index + delta, len(self.log_lines) - 1)
+                0, min(self.log_scroll_index + delta, len(self.visible_log_lines()) - 1)
             )
             return True
         if key == "g":
             self.stop_log_stream()
             self.log_lines = []
+            self._logs_loaded = False
             self.last_log_refresh = 0.0
             self.set_status("Logs refreshed.")
             return True
@@ -1705,9 +1690,11 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.set_status("Log follow paused.")
             return True
         if key == "f":
+            if self.log_until:
+                self.set_status("Clear Until to enable follow mode.")
+                return True
             self.log_follow = not self.log_follow
             self.stop_log_stream()
-            self.log_lines = []
             self.set_status(f"Log follow mode {'enabled' if self.log_follow else 'disabled'}.")
             return True
         if key == "/":
@@ -1718,16 +1705,12 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             return True
         if key == "e":
             self.log_errors_only = not self.log_errors_only
-            self.stop_log_stream()
-            self.log_lines = []
             self.set_status(f"Error-only logs {'enabled' if self.log_errors_only else 'disabled'}.")
             return True
         if key == "c":
-            self.stop_log_stream()
             self.log_filter = ""
             self.log_search = ""
             self.log_errors_only = False
-            self.log_lines = []
             self.set_status("Cleared log filter.")
             return True
         if key in ("+", "="):
@@ -1736,6 +1719,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             )
             self.stop_log_stream()
             self.log_lines = []
+            self._logs_loaded = False
             self.set_status(f"Increased log limit to {self.log_tail_limit} lines.")
             return True
         if key == "-":
@@ -1744,7 +1728,15 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             )
             self.stop_log_stream()
             self.log_lines = []
+            self._logs_loaded = False
             self.set_status(f"Decreased log limit to {self.log_tail_limit} lines.")
+            return True
+        if key == "t":
+            self.log_timestamps = not self.log_timestamps
+            self._reload_log_window()
+            return True
+        if key == "w":
+            self.start_input("Log window SINCE,UNTIL (empty clears): ", self._set_log_window, initial=f"{self.log_since},{self.log_until}")
             return True
         if key == "h":
             self._toggle_log_highlights()
@@ -2005,6 +1997,9 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self._action("rename_container", sel["id"], new_name)
 
     def _open_logs_view(self) -> None:
+        self.stop_log_stream()
+        self._logs_loaded = False
+        self.log_highlight_regex = None
         if (
             self.current_tab == "compose"
             and self.compose_rows
@@ -2196,14 +2191,13 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
     def _start_log_search(self) -> None:
         query = self.prompt_user("Enter search term: ")
-        self.stop_log_stream()
         self.log_search = query
         self.log_filter = query
         self.log_match_index = -1
-        self.log_lines = []
+        self.log_scroll_index = 0
 
     def _toggle_log_highlights(self) -> None:
-        if not self.config.log_highlights:
+        if not self._log_highlights():
             self.set_status("No log highlights configured. Open Settings (Shift+S) to add some.")
             return
         if self.log_highlight_regex is not None:
@@ -2211,7 +2205,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.set_status("Log highlights disabled.")
             return
         patterns = []
-        for entry in self.config.log_highlights:
+        for entry in self._log_highlights():
             pattern = entry.get("pattern", "")
             if not pattern:
                 continue
@@ -2372,3 +2366,36 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.event_streamer = None
         self.event_target = None
         self.event_feed = EventFeed()
+
+    def _log_options(self) -> dict[str, Any]:
+        return {key: value for key, value in {"since": self.log_since, "until": self.log_until, "timestamps": self.log_timestamps}.items() if value}
+
+    def visible_log_lines(self) -> list[str]:
+        return [line for line in self.log_lines
+                if (not self.log_errors_only or _log_is_error_line(line))
+                and _log_matches_filter(line, self.log_filter)]
+
+    def _log_highlights(self) -> list[dict[str, str]]:
+        target = self.active_container or {}
+        keys = [f"container:{target.get('name', '')}",
+                f"service:{target.get('compose_project', '')}/{target.get('compose_service', '')}",
+                f"project:{self.active_project or target.get('compose_project', '')}"]
+        for key in keys:
+            if key in self.config.log_presets:
+                return self.config.log_presets[key]
+        return self.config.log_highlights
+
+    def _reload_log_window(self) -> None:
+        self.stop_log_stream()
+        self.log_lines = []
+        self._logs_loaded = False
+        self.log_scroll_index = 0
+        self.need_redraw = True
+
+    def _set_log_window(self, value: str) -> None:
+        parts = value.split(",", 1)
+        self.log_since = parts[0].strip()
+        self.log_until = parts[1].strip() if len(parts) == 2 else ""
+        if self.log_until:
+            self.log_follow = False
+        self._reload_log_window()

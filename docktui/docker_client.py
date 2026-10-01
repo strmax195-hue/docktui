@@ -587,23 +587,37 @@ class DockerClient:
 
     # ------------------------------------------------------------------ logs / inspect
 
-    def get_logs(self, container_id: str, tail: int = 40) -> str:
-        if not self.is_docker_installed():
-            return "Docker not installed."
-        out = self._capture(
-            [str(self.docker_bin), "logs", f"--tail={tail}", container_id],
-            action="reading logs",
-        )
-        return out or "(no logs available)"
+    def logs_command(
+        self, container_id: Optional[str], project_name: Optional[str] = None,
+        tail: int = 40, since: str = "", until: str = "", timestamps: bool = False,
+        follow: bool = False,
+    ) -> list[str]:
+        command = [str(self.docker_bin)]
+        command += ["compose", "-p", project_name, "logs"] if project_name else ["logs"]
+        command.append(f"--tail={tail}")
+        if since:
+            command.append(f"--since={since}")
+        if until:
+            command.append(f"--until={until}")
+        if timestamps:
+            command.append("--timestamps")
+        if follow:
+            command.append("-f")
+        if not project_name:
+            if not container_id:
+                raise ValueError("Container ID is required")
+            command.append(container_id)
+        return command
 
-    def get_compose_project_logs(self, project_name: str, tail: int = 40) -> str:
+    def get_logs(self, container_id: str, tail: int = 40, **options) -> str:
         if not self.is_docker_installed():
             return "Docker not installed."
-        out = self._capture(
-            [str(self.docker_bin), "compose", "-p", project_name, "logs", f"--tail={tail}"],
-            action="reading Compose logs",
-        )
-        return out or "(no logs available)"
+        return self._capture(self.logs_command(container_id, tail=tail, **options), action="reading logs")
+
+    def get_compose_project_logs(self, project_name: str, tail: int = 40, **options) -> str:
+        if not self.is_docker_installed():
+            return "Docker not installed."
+        return self._capture(self.logs_command(None, project_name, tail=tail, **options), action="reading Compose logs")
 
     def inspect_container(self, container_id: str) -> str:
         if not self.is_docker_installed():
