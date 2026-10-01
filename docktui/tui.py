@@ -351,6 +351,8 @@ class ContainerDashboard:
         self.status_message = "Welcome to DockTUI! Use Tab or 1/2 keys to switch tabs."
         self.status_time = time.time()
         self.last_refresh = 0.0
+        self.last_attempt = 0.0
+        self.refresh_error = ""
         self.refresh_interval = self.config.refresh_interval
         self.state_filter = StateFilter.ALL.value
         self.sort_mode = "default"
@@ -891,6 +893,18 @@ class ContainerDashboard:
 
     def refresh_data(self) -> None:
         self.refresh_in_progress = True
+        self.last_attempt = time.time()
+        try:
+            self._refresh_data()
+            self.refresh_error = ""
+        except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
+            self.refresh_error = str(exc)
+            self.set_status(f"Refresh failed; keeping last snapshot: {exc}")
+        finally:
+            self.refresh_in_progress = False
+            self.need_redraw = True
+
+    def _refresh_data(self) -> None:
         current_context = self.client.get_current_context()
         if self.current_tab in ("containers", "compose"):
             containers = self.sort_containers(self.client.list_containers())
@@ -1006,6 +1020,9 @@ class ContainerDashboard:
             print("\nPress 'q' to quit, or 'r' to retry connection.")
             return
 
+        if self.refresh_error:
+            age = f"{max(0, time.time() - self.last_refresh):.0f}s old" if self.last_refresh else "unavailable"
+            print(truncate(f"STALE ({age}): {self.refresh_error}", width))
         self._draw_tab_header(width)
         self._list_clipped = None
         if self.current_tab == "containers":
@@ -3004,7 +3021,7 @@ class ContainerDashboard:
                     self.draw_current()
 
                 if self.view_mode == ViewMode.MAIN and (
-                    time.time() - self.last_refresh > self.refresh_interval
+                    time.time() - self.last_attempt > self.refresh_interval
                 ):
                     self.request_refresh()
                 log_pinned = self.pinned_view == ViewMode.LOGS and self.view_mode in (

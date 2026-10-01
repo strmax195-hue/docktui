@@ -22,6 +22,7 @@ A release focused on people who run Docker hosts: scriptable health checks, diag
 - `py.typed` marker, `Typing :: Typed` and sysadmin classifiers; CI integration job against a real Docker daemon; CLI smoke tests; release workflow attaches the wheel and sdist to the GitHub release and checks the tag matches the package version.
 
 ### Fixed
+- Docker collection errors no longer appear as empty successful results: `check` returns UNKNOWN (3), including missing requested resource metrics; `status --json` emits a structured error. The dashboard keeps its last successful snapshot with a stale-data warning.
 - **Dropped key presses on Linux/macOS**: the terminal was switched into raw mode only for 50 ms per poll using `TCSAFLUSH`, which discarded keys typed in between and echoed arrow-key escape sequences onto the screen. The terminal now stays in cbreak mode for the whole session and is restored for prompts, interactive `exec` and on exit.
 - **CPU/memory stats missing** with recent Docker releases, which print full 64-character IDs in `docker stats` while `docker ps` prints short IDs.
 - **Bulk start/stop (`Ctrl+S`)**, **custom hotkeys (`hotkey_overlays`)** and **pinned panes (`P` in Logs/Details)** were listed in the 1.4.0 notes but were not wired into the dashboard. They are now implemented and tested; bulk actions ask for confirmation and run as a single `docker stop|start` call.
