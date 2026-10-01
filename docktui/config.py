@@ -8,6 +8,9 @@ this object.
 """
 
 import json
+import math
+import re
+import tempfile
 import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -147,7 +150,8 @@ class Config:
             return f"invalid JSON ({exc})"
         if not isinstance(raw, dict):
             return "top-level value must be a JSON object"
-        return None
+        errors = Config.validation_errors(raw)
+        return "; ".join(errors) if errors else None
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "Config":
@@ -169,9 +173,24 @@ class Config:
         """Persist the configuration to `path` (default: the file it was loaded from)."""
         target = path or self.path
         target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8") as fh:
-            json.dump(self.to_dict(), fh, indent=2, sort_keys=True)
-            fh.write("\n")
+        data = self.to_dict()
+        errors = self.validation_errors(data)
+        if errors:
+            raise ValueError("; ".join(errors))
+        temporary: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=target.parent, prefix=".docktui-", delete=False
+            ) as fh:
+                temporary = Path(fh.name)
+                json.dump(data, fh, indent=2, sort_keys=True, allow_nan=False)
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(temporary, target)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         self._path = target
         return target
 
@@ -201,8 +220,11 @@ class Config:
                 try:
                     if isinstance(value, bool):
                         raise TypeError
-                    clean[key] = int(float(value)) if ftype is int else float(value)
-                except (TypeError, ValueError):
+                    number = float(value)
+                    if not math.isfinite(number):
+                        raise ValueError
+                    clean[key] = int(number) if ftype is int else number
+                except (TypeError, ValueError, OverflowError):
                     del clean[key]
         # Coerce list fields to the right type to be tolerant of malformed input.
         for key in ("exec_presets", "log_highlights", "endpoints"):
@@ -223,12 +245,30 @@ class Config:
             clean["theme"] = "high_contrast"
         if clean.get("theme") not in AVAILABLE_THEMES:
             clean["theme"] = DEFAULT_THEME
-        return cls(**clean)
+        config = cls(**clean)
+        config.validate()
+        return config
 
     # ------------------------------------------------------------------ validation
 
     def validate(self) -> None:
         """Clamp the config to safe ranges in-place."""
+        defaults = Config()
+        for entry in fields(self):
+            if entry.type in (int, float):
+                value = getattr(self, entry.name)
+                try:
+                    valid = not isinstance(value, bool) and math.isfinite(float(value))
+                except (TypeError, ValueError, OverflowError):
+                    valid = False
+                if not valid:
+                    setattr(self, entry.name, getattr(defaults, entry.name))
+        if self.log_max < 1:
+            self.log_max = DEFAULT_LOG_MAX
+        if self.log_min < 1 or self.log_min > self.log_max:
+            self.log_min = min(DEFAULT_LOG_MIN, self.log_max)
+        if self.log_tail_step < 1:
+            self.log_tail_step = DEFAULT_LOG_TAIL_STEP
         if self.refresh_interval < 0.5:
             self.refresh_interval = DEFAULT_REFRESH_INTERVAL
         if self.refresh_interval_images < 0.5:
@@ -252,6 +292,90 @@ class Config:
         if self.theme not in AVAILABLE_THEMES:
             self.theme = DEFAULT_THEME
         self.exec_presets = [str(p) for p in (self.exec_presets or []) if str(p).strip()]
-        self.log_highlights = [h for h in (self.log_highlights or []) if isinstance(h, dict)]
-        self.endpoints = [e for e in (self.endpoints or []) if isinstance(e, dict)]
-        self.hotkey_overlays = {str(k): str(v) for k, v in (self.hotkey_overlays or {}).items()}
+        self.log_highlights = [h for h in (self.log_highlights or []) if self._valid_highlight(h)]
+        self.endpoints = [e for e in (self.endpoints or []) if self._valid_endpoint(e)]
+        unique = {e["name"]: e for e in self.endpoints}
+        self.endpoints = list(unique.values())
+        self.hotkey_overlays = {
+            k: v for k, v in (self.hotkey_overlays or {}).items()
+            if isinstance(k, str) and isinstance(v, str) and k and v.strip()
+        }
+
+    @staticmethod
+    def _valid_endpoint(value: Any) -> bool:
+        return isinstance(value, dict) and all(
+            isinstance(value.get(key), str) and bool(value[key].strip())
+            for key in ("name", "host")
+        )
+
+    @staticmethod
+    def _valid_highlight(value: Any) -> bool:
+        if not isinstance(value, dict) or not isinstance(value.get("pattern"), str):
+            return False
+        if not isinstance(value.get("label", ""), str):
+            return False
+        try:
+            re.compile(value["pattern"])
+        except re.error:
+            return False
+        return True
+
+    @classmethod
+    def validation_errors(cls, raw: dict[str, Any]) -> list[str]:
+        """Explain the original values, before runtime fallback or clamping."""
+        errors = []
+        defaults = cls()
+        numeric = {f.name: f for f in fields(cls) if f.type in (int, float)}
+        values = dict(raw)
+        polls = raw.get("poll_intervals")
+        if polls is not None:
+            if not isinstance(polls, dict):
+                errors.append("poll_intervals must be an object")
+            else:
+                for resource, key in _POLL_INTERVAL_KEYS.items():
+                    if resource in polls and key not in values:
+                        values[key] = polls[resource]
+        for key, entry in numeric.items():
+            if key not in values:
+                continue
+            value = values[key]
+            try:
+                number = float(value)
+                if isinstance(value, bool) or not math.isfinite(number):
+                    raise ValueError
+                minimum = 0.5 if key.startswith("refresh_interval") else 1
+                if key in ("cpu_alert_threshold", "exec_history_cap"):
+                    minimum = 0
+                if number < minimum or (entry.type is int and number != int(number)):
+                    raise ValueError
+                if key == "cpu_alert_threshold" and number > 100:
+                    raise ValueError
+            except (TypeError, ValueError, OverflowError):
+                errors.append(f"{key} must be finite and within its valid range")
+                values[key] = getattr(defaults, key)
+        lo = float(values.get("log_min", defaults.log_min))
+        hi = float(values.get("log_max", defaults.log_max))
+        tail = float(values.get("log_tail_limit", defaults.log_tail_limit))
+        if not lo <= tail <= hi:
+            errors.append("log_min <= log_tail_limit <= log_max is required")
+        names = []
+        endpoints = raw.get("endpoints", [])
+        if not isinstance(endpoints, list) or any(not cls._valid_endpoint(e) for e in endpoints):
+            errors.append("endpoints must contain non-empty string name and host")
+        else:
+            names = [e["name"] for e in endpoints]
+            if len(names) != len(set(names)):
+                errors.append("endpoints contain duplicate names")
+        active = raw.get("active_endpoint")
+        if active is not None and (not isinstance(active, str) or active not in names):
+            errors.append("active_endpoint does not name a configured endpoint")
+        highlights = raw.get("log_highlights", [])
+        if not isinstance(highlights, list) or any(not cls._valid_highlight(h) for h in highlights):
+            errors.append("log_highlights must contain valid regular expressions")
+        overlays = raw.get("hotkey_overlays", {})
+        if not isinstance(overlays, dict) or any(
+            not isinstance(k, str) or not isinstance(v, str) or not k or not v.strip()
+            for k, v in overlays.items()
+        ):
+            errors.append("hotkey_overlays must map keys to non-empty command strings")
+        return errors

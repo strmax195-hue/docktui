@@ -401,3 +401,10 @@ package renders dashboard resources, logs, text screens and dialogs. Background
 operations use `jobs.py` and immutable connection snapshots. Log severity and
 highlight formatting live in `log_format.py`. Public dashboard methods remain
 available for integrations. Unix PTY tests cover quit, Ctrl+C and resize.
+
+Configuration writes use atomic replacement: failed writes preserve the previous
+file. `docktui doctor` reports invalid original values even when runtime settings
+use safe defaults. Unknown active endpoints fail rather than selecting a
+different Docker host. CI requires 50% combined statement/branch coverage and
+35% branch coverage; the observed pre-refactor combined coverage was 52%
+(approximately 40% branches), with coverage JSON retained as an artifact.
