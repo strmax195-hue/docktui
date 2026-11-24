@@ -11,6 +11,8 @@ from docktui import __version__
 from docktui.cli import main
 
 
+@patch("sys.stdin.isatty", lambda: True)
+@patch("sys.stdout.isatty", lambda: True)
 class TestCli(unittest.TestCase):
     @patch("docktui.cli.ContainerDashboard")
     @patch("sys.argv", ["docktui", "--refresh-interval", "3.5", "--docker-timeout", "12"])
@@ -199,10 +201,36 @@ class TestCliCommands(unittest.TestCase):
 
     @patch("docktui.cli.ContainerDashboard")
     def test_no_color_flag_sets_env(self, mock_dashboard):
-        with patch.dict(os.environ, {}, clear=False):
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+        ):
             os.environ.pop("NO_COLOR", None)
             main(["--no-color"])
             self.assertEqual(os.environ.get("NO_COLOR"), "1")
+
+    def test_dashboard_requires_interactive_input_and_output(self):
+        for stdin, stdout in ((False, True), (True, False), (False, False)):
+            with self.subTest(stdin=stdin, stdout=stdout):
+                error = io.StringIO()
+                with (
+                    patch("sys.stdin.isatty", return_value=stdin),
+                    patch("sys.stdout.isatty", return_value=stdout),
+                    patch("docktui.cli.ContainerDashboard") as dashboard,
+                    redirect_stderr(error),
+                    self.assertRaises(SystemExit) as exit_code,
+                ):
+                    main([])
+                self.assertEqual(exit_code.exception.code, 2)
+                self.assertIn("docktui status", error.getvalue())
+                dashboard.assert_not_called()
+
+    def test_empty_hosts_argument_does_not_fall_back_to_local_docker(self):
+        with patch("docktui.cli.DockerClient") as client:
+            code, _ = _run(["check", "--hosts", ""])
+        self.assertEqual(code, 2)
+        client.assert_not_called()
 
 
 if __name__ == "__main__":

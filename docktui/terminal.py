@@ -50,23 +50,22 @@ try:
 
     def get_key_nonblocking() -> Optional[str]:
         if msvcrt.kbhit():  # type: ignore[attr-defined]
-            ch = msvcrt.getch()  # type: ignore[attr-defined]
-            if ch in (b"\x00", b"\xe0"):
-                ch2 = msvcrt.getch()  # type: ignore[attr-defined]
-                if ch2 == b"H":
-                    return "up"
-                if ch2 == b"P":
-                    return "down"
-            if ch in (b"\r", b"\n"):
+            ch = msvcrt.getwch()  # type: ignore[attr-defined]
+            if ch in ("\x00", "\xe0"):
+                scan = msvcrt.getwch()  # type: ignore[attr-defined]
+                return {
+                    "H": "up",
+                    "P": "down",
+                    "I": "page_up",
+                    "Q": "page_down",
+                    "G": "home",
+                    "O": "end",
+                }.get(scan)
+            if ch in ("\r", "\n"):
                 return "enter"
-            if ch in (b"\x08", b"\x7f"):
+            if ch in ("\x08", "\x7f"):
                 return "backspace"
-            if ch == b"\x1b":
-                return "\x1b"
-            try:
-                return ch.decode("utf-8")
-            except UnicodeDecodeError:
-                return None
+            return ch
         return None
 
 except ImportError:  # Unix / macOS
@@ -143,8 +142,8 @@ except ImportError:  # Unix / macOS
         final = _next_char()
         if final is None:
             return None
-        if final in ("A", "B"):
-            return "up" if final == "A" else "down"
+        if final in ("A", "B", "H", "F"):
+            return {"A": "up", "B": "down", "H": "home", "F": "end"}[final]
         if intro == "[" and final == "M":  # X10 mouse report: 3 more bytes
             data = "".join(c for c in (_next_char(), _next_char(), _next_char()) if c)
             if len(data) == 3:
@@ -154,9 +153,20 @@ except ImportError:  # Unix / macOS
                 if cb == 97:
                     return "scroll_down"
             return "mouse"
-        # Swallow the remainder of any other CSI sequence (PgUp "5~", F-keys...).
+        # Consume the entire CSI sequence even for unsupported keys.
+        params = ""
         while intro == "[" and final is not None and not ("@" <= final <= "~"):
+            params += final
             final = _next_char()
+        if final == "~":
+            return {
+                "1": "home",
+                "4": "end",
+                "5": "page_up",
+                "6": "page_down",
+                "7": "home",
+                "8": "end",
+            }.get(params)
         return None
 
     def get_key_nonblocking() -> Optional[str]:

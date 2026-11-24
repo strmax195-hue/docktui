@@ -18,6 +18,7 @@ class DialogResult:
     buffer: str = ""
     submit: Optional[Callable[[str], None]] = None
     cancel: Optional[Callable[[], None]] = None
+    multiline: bool = False
 
 
 @dataclass
@@ -35,12 +36,18 @@ def apply_dialog_key(result: DialogResult, key: str) -> bool:
         if result.submit is not None:
             result.submit(result.buffer.strip())
         return True
-    if key in ("\x1b", "q"):
+    if key == "\x1b":
         if result.cancel is not None:
             result.cancel()
         return True
     if key == "backspace":
         result.buffer = result.buffer[:-1]
+        return True
+    if key == "\x15":  # Ctrl+U
+        result.buffer = ""
+        return True
+    if key == "\x0e" and result.multiline:  # Ctrl+N
+        result.buffer += "\n"
         return True
     if len(key) == 1 and key.isprintable():
         result.buffer += key

@@ -8,6 +8,7 @@ those concerns so views can stay focused on their data.
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Optional
 
 from .constants import MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH, VIEWPORT_OVERHEAD
 from .styles import BOLD, CYAN, RESET
@@ -39,6 +40,8 @@ def clear_screen() -> None:
 def draw_frame(title: str, width: int) -> None:
     """Render a centered top frame (top border + title + bottom border)."""
     inner_w = max(0, width - 2)
+    if len(title) > inner_w:
+        title = truncate(title, inner_w)
     pad = max(0, (inner_w - len(title)) // 2)
     right_pad = max(0, inner_w - len(title) - pad)
     print(f"{CYAN}{BOLD}╔" + "═" * inner_w + f"╗{RESET}")
@@ -49,8 +52,9 @@ def draw_frame(title: str, width: int) -> None:
 def draw_status_bar(message: str, width: int) -> None:
     """Render the standard status / separator pair used at the bottom of views."""
     sep = "═" * max(1, width - 1)
-    print("\n" + sep)
-    print(f"{BOLD}Status:{RESET} {message}")
+    message = " ".join(message.splitlines())
+    print(sep)
+    print(f"{BOLD}Status:{RESET} {truncate(message, width - 8).rstrip()}")
     print(sep)
 
 
@@ -78,6 +82,24 @@ def list_window(total: int, selected: int, rows: int) -> tuple[int, int]:
         return 0, total
     start = min(max(0, selected - rows // 2), total - rows)
     return start, start + rows
+
+
+def navigation_index(key: str, current: int, last: int, page_size: int) -> Optional[int]:
+    """Return a bounded row index for a navigation key, or None for other input."""
+    step = max(1, page_size)
+    positions = {
+        "up": current - 1,
+        "down": current + 1,
+        "scroll_up": current - 3,
+        "scroll_down": current + 3,
+        "page_up": current - step,
+        "page_down": current + step,
+        "home": 0,
+        "end": last,
+    }
+    if key not in positions:
+        return None
+    return max(0, min(last, positions[key]))
 
 
 def wrap_hints(text: str, width: int, sep: str = " | ") -> list[str]:

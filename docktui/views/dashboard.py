@@ -29,8 +29,8 @@ class DashboardViews:
             parsed = self.client.parse_docker_host()
             host_display = parsed["display"] if parsed else self.client.docker_host
             context_text = (
-                f" [{self.current_context} ({host_display})]"
-                if self.current_context
+                f" [{self.active_endpoint} · {host_display}]"
+                if self.active_endpoint
                 else f" [{host_display}]"
             )
         else:
@@ -38,27 +38,34 @@ class DashboardViews:
         title_text = f"DockTUI Container Dashboard{context_text}"
         draw_frame(title_text, width)
 
-        if not self.client.is_docker_installed():
+        if self.current_tab != "contexts" and not self.client.is_docker_installed():
             print(f"\n{palette.RED}{palette.BOLD}Error: Docker CLI not found.{palette.RESET}")
-            print("Please make sure Docker is installed and in your system PATH.")
-            print("\nPress 'q' to quit.")
+            print("Install the Docker CLI, then run 'docktui doctor' to check your setup.")
+            print("\n[?] Help  [q] Quit")
             return
 
-        if not self.is_daemon_running_cached():
-            print(
-                f"\n{palette.YELLOW}{palette.BOLD}Warning: Cannot connect to the Docker daemon.{palette.RESET}"
-            )
-            print("Please make sure Docker Desktop or the docker service is running.")
-            print("\nPress 'q' to quit, or 'r' to retry connection.")
+        loaded = self._visible_snapshot_time() if self._running else self.last_refresh
+        error = (
+            self.refresh_error
+            if not self._running or self._failed_request == self._snapshot_request()
+            else ""
+        )
+        waiting = not loaded if self._running else not self.is_daemon_running_cached()
+        if self.current_tab != "contexts" and waiting:
+            self._draw_tab_header(width)
+            if self._running and not error:
+                print(f"\n{palette.CYAN}Loading {self.current_tab}…{palette.RESET}")
+            else:
+                print(f"\n{palette.YELLOW}{palette.BOLD}Cannot collect Docker data.{palette.RESET}")
+                if error:
+                    print(error)
+                print("Run 'docktui doctor' to check the connection and permissions.")
+            print("\n[g] Retry  [6] Choose connection  [?] Help  [q] Quit")
             return
 
-        if self.refresh_error:
-            age = (
-                f"{max(0, time.time() - self.last_refresh):.0f}s old"
-                if self.last_refresh
-                else "unavailable"
-            )
-            print(truncate(f"STALE ({age}): {self.refresh_error}", width))
+        if error:
+            age = f"{max(0, time.time() - loaded):.0f}s old" if loaded else "unavailable"
+            print(truncate(f"STALE ({age}): {error}", width))
         self._draw_tab_header(width)
         self._list_clipped = None
         if self.current_tab == "containers":
@@ -77,7 +84,7 @@ class DashboardViews:
         status = self.status_message
         if self._list_clipped:
             start, end, total = self._list_clipped
-            status = f"{status}  [rows {start + 1}-{end} of {total}]"
+            status = f"[rows {start + 1}-{end} of {total}]  {status}"
         pinned = self._pinned_label()
         if pinned:
             status = f"{status}  [pinned: {pinned}, Shift+P to unpin]"
@@ -85,21 +92,13 @@ class DashboardViews:
         self._draw_main_footer()
 
     def _draw_tab_header(self: Any, width: int) -> None:
-        tab_labels = {
-            "containers": "Containers",
-            "compose": "Compose",
-            "images": "Images",
-            "volumes": "Volumes",
-            "networks": "Networks",
-            "contexts": "Contexts",
-        }
         header_parts: list[str] = []
         for idx, tab in enumerate(self.tabs, start=1):
-            label = f"{tab_labels[tab]} ({idx})"
+            label = f"{idx} {tab.title()}"
             header_parts.append(
-                f"{palette.WHITE_ON_BLUE} {label} {palette.RESET}"
+                f"{palette.WHITE_ON_BLUE}[{label}]{palette.RESET}"
                 if tab == self.current_tab
-                else f"[{label}]"
+                else label
             )
         filter_bits: list[str] = []
         active_filter = self.filters.get(self.current_tab, "")
@@ -110,8 +109,9 @@ class DashboardViews:
                 filter_bits.append(f"state: {self.state_filter}")
             if self.sort_mode != "default":
                 filter_bits.append(f"sort: {self.sort_mode}")
-        filter_status = "    [" + " | ".join(filter_bits) + "]" if filter_bits else ""
-        print("   ".join(header_parts) + filter_status)
+        print("  ".join(header_parts))
+        if filter_bits:
+            print(truncate(" | ".join(filter_bits), width - 1).rstrip())
         print("─" * (width - 1))
 
     def _list_window(self: Any, total: int, selected: int, reserved: int) -> tuple[int, int]:
@@ -139,11 +139,9 @@ class DashboardViews:
 
     def _draw_containers_tab(self: Any, width: int) -> None:
         if not self.containers:
-            if self.container_filter:
-                print(
-                    f"\n{palette.CYAN}No containers match the active filter: '{self.container_filter}'{palette.RESET}"
-                )
-                print("Press [C] to clear the filter.")
+            if self.container_filter or self.state_filter != StateFilter.ALL.value:
+                print(f"\n{palette.CYAN}No containers match the current filters.{palette.RESET}")
+                print("[c] Clear text filter  [y] Change state filter")
             else:
                 self.draw_empty_state("containers", width)
             return
@@ -198,7 +196,11 @@ class DashboardViews:
 
     def _draw_compose_tab(self: Any, width: int) -> None:
         if not self.compose_rows:
-            self.draw_empty_state("compose", width)
+            if self.filters.get("compose") or self.state_filter != StateFilter.ALL.value:
+                print("No Compose rows match the current filters.")
+                print("[c] Clear text filter  [y] Change state filter")
+            else:
+                self.draw_empty_state("compose", width)
             return
         service_w = max(18, int(width * 0.25))
         name_w = max(18, int(width * 0.25))
@@ -215,8 +217,9 @@ class DashboardViews:
             if row["type"] == "project":
                 project = str(row["project"])
                 count = len(row["containers"])  # type: ignore[arg-type]
+                marker = "» " if idx == self.selected_compose_index else "  "
                 print(
-                    f"{style}{palette.BOLD}{truncate(project + '  (' + str(count) + ')', service_w)} {truncate('', name_w)} {'':<10} {truncate('', image_w)}{palette.RESET}"
+                    f"{style}{palette.BOLD}{truncate(f'{marker}{project}  ({count})', service_w)} {truncate('', name_w)} {'':<10} {truncate('', image_w)}{palette.RESET}"
                 )
             else:
                 container = row["container"]  # type: ignore[assignment]
@@ -313,12 +316,8 @@ class DashboardViews:
         print("─" * (width - 1))
 
     def _draw_contexts_tab(self: Any, width: int) -> None:
-        if self.client.docker_host:
-            print(
-                f"{palette.YELLOW}{palette.BOLD}Note: DOCKER_HOST is active. Context switching is bypassed (DOCKER_HOST overrides context).{palette.RESET}"
-            )
-            print("─" * (width - 1))
-        if not self.contexts:
+        rows = self.connection_rows()
+        if not rows:
             active_filter = self.filters.get("contexts")
             if active_filter:
                 print(
@@ -329,44 +328,41 @@ class DashboardViews:
                 self.draw_empty_state("contexts", width)
             return
         name_w = max(20, int(width * 0.25))
-        desc_w = max(24, int(width * 0.30))
-        endpoint_w = max(24, width - name_w - desc_w - 14)
+        desc_w = max(14, int(width * 0.22))
+        endpoint_w = max(16, width - name_w - desc_w - 15)
         print(
-            f"{palette.BOLD}{truncate('CONTEXT', name_w)} {'CUR':<5} {truncate('DESCRIPTION', desc_w)} {truncate('ENDPOINT', endpoint_w)}{palette.RESET}"
+            f"{palette.BOLD}{truncate('CONNECTION', name_w)} {'KIND':<8}   {truncate('DESCRIPTION', desc_w)} {truncate('ENDPOINT', endpoint_w)}{palette.RESET}"
         )
         print("─" * (width - 1))
-        start, end = self._list_window(len(self.contexts), self.selected_context_index, reserved=14)
-        for idx, context in list(enumerate(self.contexts))[start:end]:
+        start, end = self._list_window(len(rows), self.selected_context_index, reserved=14)
+        for idx in range(start, end):
+            context = rows[idx]
             style = palette.WHITE_ON_BLUE if idx == self.selected_context_index else ""
             marker = "» " if idx == self.selected_context_index else "  "
+            kind = "endpoint" if "host" in context else "context"
+            active = context.get("current", "").lower() in ("true", "*")
+            active = active and (kind == "endpoint" or not self.client.docker_host)
             print(
                 f"{style}{truncate(marker + context['name'], name_w)} "
-                f"{context['current']:<5} {truncate(context['description'], desc_w)} "
-                f"{truncate(context['endpoint'], endpoint_w)}{palette.RESET}"
+                f"{kind:<8} {'*' if active else ' '} {truncate(context.get('description', ''), desc_w)} "
+                f"{truncate(context.get('endpoint', ''), endpoint_w)}{palette.RESET}"
             )
         print("─" * (width - 1))
 
     def _main_footer_hints(self: Any) -> str:
-        if self.current_tab == "compose":
-            row = self.compose_rows[self.selected_compose_index] if self.compose_rows else None
-            if row and row.get("type") == "project":
-                return "[U] Up | [D] Down | [B] Build | [R] Restart | [L] Project Logs | [Tab] Switch | [?] Help | [Q] Quit"
-            else:
-                return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "containers":
-            return "[S] Start/Stop | [R] Restart | [L] Logs | [V] Details | [I] Inspect | [E] Exec | [X] Compose | [W] Resources | [Shift+C] Clone | [O] Sort | [Y] State | [Ctrl+S] Bulk Start/Stop | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "images":
-            return "[D] Delete | [F] Search & Pull | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "volumes":
-            return "[D] Delete | [Shift+F] Browse Files | [P] Disk/Prune | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
-        elif self.current_tab == "networks":
-            return (
-                "[D] Delete | [Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
-            )
-        elif self.current_tab == "contexts":
-            return "[U] Use | [N] New Endpoint | [Shift+S] Settings | [Tab] Switch | [G] Refresh | [?] Help | [Q] Quit"
-        else:
-            return "[Tab] Switch | [G] Refresh | [Shift+S] Settings | [?] Help | [Q] Quit"
+        hints = {
+            "containers": "[l] Logs | [v] Details | [s] Start/stop | [/] Filter",
+            "compose": "[l] Logs | [s] Start/stop | [/] Filter",
+            "images": "[f] Search & pull | [d] Delete | [/] Filter",
+            "volumes": "[Shift+F] Browse files | [d] Delete | [/] Filter",
+            "networks": "[d] Delete | [/] Filter",
+            "contexts": "[Enter] Connect | [n] Add endpoint | [/] Filter",
+        }
+        current = hints[self.current_tab]
+        if self.current_tab == "compose" and self.compose_rows:
+            if self.compose_rows[self.selected_compose_index]["type"] == "project":
+                current = "[u] Up | [d] Down | [b] Build | [l] Project logs"
+        return f"{current} | [?] All keys | [q] Quit"
 
     def _draw_main_footer(self: Any) -> None:
         width = get_terminal_size().width
@@ -416,7 +412,7 @@ class DashboardViews:
             from ..styles import strip_ansi
 
             visible_len = len(strip_ansi(line))
-            pad_r = max(0, box_w - 4 - visible_len)
+            pad_r = max(0, box_w - 5 - visible_len)
             print(
                 margin
                 + f"{palette.CYAN}│{palette.RESET}  {line}"

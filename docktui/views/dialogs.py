@@ -7,18 +7,103 @@ from ..screen import (
     clear_screen,
     draw_frame,
     get_terminal_size,
+    list_window,
+    navigation_index,
     pad_to_viewport,
     slice_viewport,
     truncate,
 )
+
+# Show the shortcuts for the current screen first, followed by the complete guide.
+_HELP_TOPICS = {
+    "Dashboard": (
+        "Tab / 1–6       Switch resource tabs",
+        "↑ / ↓ / wheel   Move the selection",
+        "PgUp / PgDn     Move one page • Home / End jumps to either end",
+        "/ / c           Set or clear the tab filter",
+        "g / m           Refresh data / change color theme",
+        "Shift+S         Open settings",
+        "? / q           Show keyboard help / quit the dashboard",
+    ),
+    "Containers and Compose": (
+        "l / v / i       Open logs, details or inspect JSON",
+        "t / e / x       Show processes, run a command or generate Compose YAML",
+        "s / r           Start or stop / restart the selected container or project",
+        "o / y           Cycle sort order / state filter",
+        "n / Shift+C     Rename / clone a container",
+        "w / p           Edit CPU and memory limits / show Docker disk usage",
+        "Ctrl+S          Start or stop the filtered set after confirmation",
+        "Ctrl+letter     Run a configured container command",
+        "u / d / b       Bring a Compose project up, down or build it",
+        "Shift+P         Unpin the open pane",
+    ),
+    "Logs": (
+        "f / Space       Toggle follow / pause",
+        "/ / n / c       Search, jump to the next match or clear filters",
+        "e / h           Toggle errors and warnings / configured highlights",
+        "w / t           Set a time window / toggle timestamps",
+        "+ / - / g       Change the tail limit / reload logs",
+        "p / o           Pin this view / export the buffer",
+        "Esc / l         Return to the dashboard",
+    ),
+    "Container details and output": (
+        "↑ / ↓ / wheel   Scroll through the output",
+        "e / p           In Details, toggle events / pin the pane",
+        "o               Export details, inspect, processes or Compose YAML",
+        "r / e           In Exec, run again / choose a different command",
+        "Esc             Return to the dashboard",
+    ),
+    "Images and registry": (
+        "f / Enter       Search Docker Hub / pull the highlighted result",
+        "d / p           Delete a local image / show Docker disk usage",
+        "o               Export search results or pull output",
+        "Esc             Leave search or cancel an active pull",
+    ),
+    "Volumes and networks": (
+        "Shift+F         Browse files in the selected volume",
+        "Enter           Open the selected directory",
+        "Backspace       Go up one directory",
+        "o               Export the directory listing",
+        "d               Delete the selected volume or network",
+    ),
+    "Contexts": (
+        "Enter / u       Connect to the selected context or named endpoint",
+        "n               Add and connect to a named endpoint",
+    ),
+    "Settings and cleanup": (
+        "Enter           Edit the highlighted setting",
+        "s / o           Save settings / export displayed settings",
+        "x / i / v / a   Prune system, images, volumes or system with volumes",
+        "Esc             Return to the dashboard",
+    ),
+}
+
+_HELP_CONTEXT = {
+    "containers": "Containers and Compose",
+    "compose": "Containers and Compose",
+    "images": "Images and registry",
+    "search": "Images and registry",
+    "pull_progress": "Images and registry",
+    "volumes": "Volumes and networks",
+    "networks": "Volumes and networks",
+    "files": "Volumes and networks",
+    "contexts": "Contexts",
+    "logs": "Logs",
+    "settings": "Settings and cleanup",
+    "system": "Settings and cleanup",
+}
 
 
 class DialogsViews:
     def draw_input_view(self: Any) -> None:
         previous = self.previous_view_mode
         self._dispatch_view(previous)
+        hints = "[Ctrl+U] Clear  [Enter] Apply  [Esc] Back"
+        if self.input_dialog.multiline:
+            hints = "[Ctrl+N] New line  " + hints
+        print(f"\n{palette.CYAN}{hints}{palette.RESET}")
         print(
-            f"\n{palette.YELLOW}{palette.BOLD}{self.input_dialog.prompt}{palette.RESET}{self.input_dialog.buffer}",
+            f"{palette.YELLOW}{palette.BOLD}{self.input_dialog.prompt}{palette.RESET}{self.input_dialog.buffer}",
             end="",
             flush=True,
         )
@@ -33,58 +118,41 @@ class DialogsViews:
                     flush=True,
                 )
 
+    def _help_lines(self: Any) -> list[str]:
+        context = self.previous_view_mode.value
+        if context == "main":
+            context = self.current_tab
+        first = _HELP_CONTEXT.get(context, "Container details and output")
+        lines: list[str] = []
+        for title in dict.fromkeys((first, "Dashboard", *_HELP_TOPICS)):
+            if lines:
+                lines.append("")
+            lines.append(title)
+            lines.extend(f"  {hint}" for hint in _HELP_TOPICS[title])
+        return lines
+
+    def scroll_help(self: Any, key: str) -> None:
+        page = max(1, get_terminal_size().height - 6)
+        last = max(0, len(self._help_lines()) - page)
+        index = navigation_index(key, self.help_scroll_index, last, page)
+        if index is not None:
+            self.help_scroll_index = index
+
     def draw_help_view(self: Any) -> None:
         size = get_terminal_size()
-        width = size.width
-        if not getattr(self, "_split_screen_mode", False):
-            clear_screen()
-        draw_frame("DockTUI Help", width)
-        print(f"{palette.BOLD}Global{palette.RESET}")
-        print("  Tab / 1-6    Switch tabs")
-        print("  Up / Down    Move selection or scroll / Mouse scroll support")
-        print("  G            Refresh current data")
-        print("  M            Cycle theme color presets (Dark, Light, High-Contrast)")
-        print("  Shift+S      Open the Settings editor")
-        print("  ?            Open or close this help screen")
-        print("  Q / Esc      Quit or return to the previous screen")
-        print(f"\n{palette.BOLD}Containers / Compose{palette.RESET}")
-        print("  S            Start or stop the selected container / project")
-        print("  R            Restart the selected container / project")
-        print("  L            Open container or project logs")
-        print("  I            Inspect container JSON")
-        print("  E            Execute a command (interactively or in background)")
-        print("  V            Open readable container details")
-        print("  T            View container processes (docker top)")
-        print("  X            Generate a docker-compose.yml snippet")
-        print("  C (Shift)    Clone the selected container")
-        print("  W            Edit live CPU / memory limits (docker update)")
-        print("  Shift+F      Browse volume files (on the Volumes tab)")
-        print("  Ctrl+S       Bulk start/stop every container matching the filter")
-        print("  Ctrl+<key>   Run a custom `hotkey_overlays` command from your config")
-        print("  Shift+P      Unpin the pinned logs/details pane")
-        print("  O / Y        Cycle sorting and state filters")
-        print("  / / C        Apply or clear the tab filter")
-        print("  U / D / B    Compose up / down / build on the Compose tab")
-        print("  U            Use the selected Docker context")
-        print("  N            Create a new endpoint on the Contexts tab")
-        print(f"\n{palette.BOLD}Images and cleanup{palette.RESET}")
-        print("  D            Delete the selected image / volume / network")
-        print("  F            Search & pull a Docker Hub image (on the Images tab)")
-        print("  P            Open Docker disk usage and prune view")
-        print("  X / I / V / A    Run system, image, volume, or full prune")
-        print(f"\n{palette.BOLD}Logs{palette.RESET}")
-        print("  F            Toggle follow mode")
-        print("  Space        Pause follow mode")
-        print("  N            Jump to next search match")
-        print("  E            Toggle error/warning-only lines")
-        print("  H            Toggle log highlighting / regex")
-        print("  + / -        Increase or decrease log tail limit")
-        print("  / / C        Apply or clear log filter")
-        print("  P            Pin logs (or details) under the dashboard")
-        print("  O            Export logs to a local file")
-        print("  G            Refresh logs now")
-        print("\n" + "═" * (width - 1))
-        print(f"{palette.CYAN}[? / Esc / Q] Return to previous screen{palette.RESET}")
+        clear_screen()
+        lines = self._help_lines()
+        page = max(1, size.height - 6)
+        start = self.help_scroll_index = min(self.help_scroll_index, max(0, len(lines) - page))
+        end = min(len(lines), start + page)
+        draw_frame(f"Keyboard help  ·  {start + 1}–{end} of {len(lines)}", size.width)
+        for line in lines[start:end]:
+            style = palette.BOLD if line and not line.startswith(" ") else ""
+            print(f"{style}{line[: size.width - 1]}{palette.RESET}")
+        print("─" * (size.width - 1))
+        print(
+            f"{palette.CYAN}[↑/↓] Scroll  [PgUp/PgDn] Page  [Home/End] Jump  [?/Esc] Back{palette.RESET}"
+        )
 
     def draw_settings_view(self: Any) -> None:
         size = get_terminal_size()
@@ -106,7 +174,7 @@ class DialogsViews:
             print(f"{style}{marker}{label:<28} {value}{palette.RESET}")
         print("─" * (width - 1))
         print(
-            f"\n{palette.CYAN}[Up/Down] Move | [Enter] Edit | [S] Save & Apply | [Esc] Back{palette.RESET}"
+            f"\n{palette.CYAN}[Up/Down] Move | [Enter] Edit | [s] Save | [o] Export | [Esc] Back{palette.RESET}"
         )
 
     def draw_search_view(self: Any) -> None:
@@ -115,53 +183,71 @@ class DialogsViews:
         width = size.width
         if not getattr(self, "_split_screen_mode", False):
             clear_screen()
-        draw_frame("REGISTRY SEARCH", width)
+        start, end = list_window(
+            len(self.search_results), self.search_index, max(1, size.height - 7)
+        )
+        position = (
+            f"  ·  {self.search_index + 1} of {len(self.search_results)}"
+            if self.search_results
+            else ""
+        )
+        draw_frame(f"Registry search{position}", width)
         if not self.search_results:
-            print(
-                f"{palette.YELLOW}No search results. Use the dialog to enter a query.{palette.RESET}"
-            )
+            print(f"{palette.YELLOW}{self.search_message}{palette.RESET}")
         else:
-            for idx, result in enumerate(self.search_results):
+            name_width = min(40, width // 2)
+            for idx in range(start, end):
+                result = self.search_results[idx]
                 marker = "» " if idx == self.search_index else "  "
                 style = palette.WHITE_ON_BLUE if idx == self.search_index else ""
                 print(
-                    f"{style}{marker}{result['name']:<40} {truncate(result.get('description', ''), width - 50)}{palette.RESET}"
+                    f"{style}{marker}{truncate(result['name'], name_width)} {truncate(result.get('description', ''), width - name_width - 4)}{palette.RESET}"
                 )
         print("─" * (width - 1))
-        print(f"\n{palette.CYAN}[Up/Down] Move | [Enter] Pull | [Esc] Back{palette.RESET}")
+        print(
+            f"{palette.CYAN}[↑/↓] Move  [Enter] Pull  [/] New search  [o] Export  [Esc] Back{palette.RESET}"
+        )
 
     def draw_pull_progress_view(self: Any) -> None:
         size = get_terminal_size()
         width = size.width
         if not getattr(self, "_split_screen_mode", False):
             clear_screen()
-        title = f"PULLING: {self.pull_image_name}"
-        draw_frame(title, width)
-        visible, _, _ = slice_viewport(
-            self.pull_lines, self.pull_scroll_index, max(1, size.height - 6)
-        )
+        draw_frame(f"Image pull  ·  {self.pull_image_name}", width)
+        page = max(1, size.height - 7)
+        last = max(0, len(self.pull_lines) - page)
+        start = last if self.pull_follow else min(self.pull_scroll_index, last)
+        visible, _, _ = slice_viewport(self.pull_lines, start, page)
         for line in visible:
             print(line[: width - 1])
-        pad_to_viewport(len(visible), max(1, size.height - 6))
-        print("\n" + "═" * (width - 1))
-        print(f"{palette.CYAN}[Esc] Cancel & back{palette.RESET}")
+        pad_to_viewport(len(visible), page)
+        print("─" * (width - 1))
+        print(self.pull_status[: width - 1])
+        back = "Cancel pull" if self.pull_streamer and self.pull_streamer.result is None else "Back"
+        print(f"{palette.CYAN}[↑/↓] Scroll  [End] Follow  [o] Export  [Esc] {back}{palette.RESET}")
 
     def draw_files_view(self: Any) -> None:
         size = get_terminal_size()
         width = size.width
         if not getattr(self, "_split_screen_mode", False):
             clear_screen()
-        title = f"VOLUME FILES: {self.file_volume_name}  [{self.file_path}]"
+        title = f"Volume files  ·  {self.file_volume_name}  [{self.file_path}]"
         draw_frame(title, width)
         if not self.file_entries:
-            print(f"{palette.YELLOW}(empty volume or unreadable){palette.RESET}")
+            print(f"{palette.YELLOW}{self.file_message}{palette.RESET}")
         else:
-            for idx, entry in enumerate(self.file_entries):
+            start, end = list_window(
+                len(self.file_entries), self.file_index, max(1, size.height - 7)
+            )
+            for idx in range(start, end):
+                entry = self.file_entries[idx]
                 marker = "» " if idx == self.file_index else "  "
                 style = palette.WHITE_ON_BLUE if idx == self.file_index else ""
                 kind = "DIR" if entry.get("mode", "").startswith("d") else "FILE"
-                print(f"{style}{marker}{kind:<5} {entry.get('name', '')}{palette.RESET}")
+                print(
+                    f"{style}{marker}{kind:<5} {entry.get('name', '')[: width - 9]}{palette.RESET}"
+                )
         print("─" * (width - 1))
         print(
-            f"\n{palette.CYAN}[Up/Down] Move | [Enter] Open directory | [Backspace] Up | [Esc] Back{palette.RESET}"
+            f"{palette.CYAN}[↑/↓] Move  [Enter] Open  [Backspace] Up  [o] Export  [Esc] Back{palette.RESET}"
         )

@@ -6,8 +6,72 @@ import time
 import unittest
 
 
+def wait_for_pty_exit(process, master, timeout=5):
+    import select
+
+    # Keep consuming output while the child restores the terminal. A full
+    # macOS PTY buffer can otherwise block the last write during shutdown.
+    deadline = time.monotonic() + timeout
+    while process.poll() is None and time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            os.read(master, 65536)
+    return process.wait(timeout=1)
+
+
 @unittest.skipUnless(os.name == "posix", "Unix PTY coverage")
 class TestTerminal(unittest.TestCase):
+    def test_help_paging_and_registry_search_through_cli(self):
+        import pty
+        import select
+        import tempfile
+
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(
+                os.environ,
+                PATH=tmp,
+                DOCKTUI_CONFIG=os.path.join(tmp, "config.json"),
+                PYTHONIOENCODING="utf-8",
+                COLUMNS="80",
+                LINES="24",
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-m", "docktui"], env=env, stdin=slave, stdout=slave, stderr=slave
+            )
+            try:
+
+                def expect(needle):
+                    data = b""
+                    deadline = time.monotonic() + 6
+                    while needle not in data and time.monotonic() < deadline:
+                        if select.select([master], [], [], 0.1)[0]:
+                            data += os.read(master, 65536)
+                        if process.poll() is not None:
+                            break
+                    self.assertIn(needle, data, data.decode(errors="replace"))
+
+                expect(b"Docker CLI not found")
+                os.write(master, b"?")
+                expect(b"Containers and Compose")
+                os.write(master, b"\x1b[F")  # End, through the terminal decoder.
+                expect(b"Settings and cleanup")
+                os.write(master, b"?")
+                expect(b"Docker CLI not found")
+                os.write(master, b"3f")
+                expect(b"Search Docker Hub:")
+                os.write(master, b"queue\r")
+                expect(b"Search failed: Docker CLI not found")
+                os.write(master, b"\x1b")
+                expect(b"Install the Docker CLI")
+                os.write(master, b"q")
+                self.assertEqual(wait_for_pty_exit(process, master), 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+
     def test_resize_state_lives_in_terminal_module(self):
         from docktui import terminal
 
@@ -46,13 +110,9 @@ class TestTerminal(unittest.TestCase):
                         process.send_signal(signal.SIGINT)
                     else:
                         os.write(master, b"q")
-                    # macOS PTYs have small output buffers; keep draining while
-                    # the dashboard redraws and restores the terminal.
-                    deadline = time.monotonic() + 5
-                    while process.poll() is None and time.monotonic() < deadline:
-                        if select.select([master], [], [], 0.05)[0]:
-                            output += os.read(master, 65536)
-                    self.assertEqual(process.wait(timeout=1), 0, output.decode(errors="replace"))
+                    self.assertEqual(
+                        wait_for_pty_exit(process, master), 0, output.decode(errors="replace")
+                    )
                     after = termios.tcgetattr(slave)
                     # Darwin sets kernel-managed PENDIN when restoring canonical
                     # input. It does not change the user-visible terminal modes.
@@ -87,10 +147,14 @@ class TestWindowsTerminal(unittest.TestCase):
 
         with (
             patch.object(terminal.msvcrt, "kbhit", return_value=True),
-            patch.object(terminal.msvcrt, "getch", side_effect=[b"\xe0", b"H", b"q"]),
+            patch.object(
+                terminal.msvcrt, "getwch", side_effect=["\xe0", "H", "q", "я", "\xe0", "Q"]
+            ),
         ):
             self.assertEqual(terminal.get_key_nonblocking(), "up")
             self.assertEqual(terminal.get_key_nonblocking(), "q")
+            self.assertEqual(terminal.get_key_nonblocking(), "я")
+            self.assertEqual(terminal.get_key_nonblocking(), "page_down")
         with patch.object(terminal.os, "system"):
             terminal.init_terminal()
             terminal.restore_terminal()

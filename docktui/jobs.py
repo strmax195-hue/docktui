@@ -84,6 +84,16 @@ class JobRunner:
             for cancel in self._active.values():
                 cancel.set()
 
+    def cancel_foreground(self) -> bool:
+        """Cancel pending user operations. Polling must never consume a Back key."""
+        canceled = False
+        with self._condition:
+            for key, event in self._active.items():
+                if key != "refresh" and not event.is_set():
+                    event.set()
+                    canceled = True
+        return canceled
+
     def wait_idle(self, timeout: float) -> bool:
         with self._condition:
             return self._condition.wait_for(lambda: self._working == 0, timeout)
