@@ -232,7 +232,9 @@ class Config:
                     del clean[key]
         # Coerce list fields to the right type to be tolerant of malformed input.
         for key in ("exec_presets", "log_highlights", "endpoints"):
-            value = clean.get(key)
+            if key not in clean:
+                continue
+            value = clean[key]
             if value is None:
                 clean[key] = []
             elif isinstance(value, str):

@@ -2,6 +2,14 @@
 
 All notable changes to DockTUI are documented here.
 
+## Unreleased
+
+- Compose preserves the selected service across refreshes and keeps its selection independent of the Containers tab. Resource actions wait for the new list when a filter changes.
+- Keyboard help opens on the current screen's shortcuts and fits a standard 80×24 terminal. Resource lists support page navigation, Home and End. Prompts accept the letter `q`, Unicode keyboard input on Windows and multi-line edits.
+- The registry picker allows repeated searches and displays loading, empty and error results. Image pulls follow the latest output and retain their completion status. The volume browser can navigate back from an empty directory and export a listing.
+- The Contexts tab lists saved endpoints alongside Docker contexts, including when the current daemon is unavailable. Dashboard refreshes respect the configured interval for each resource.
+- Starting the dashboard with redirected input or output prints the commands for non-interactive use. First-run configurations retain the default shell presets.
+
 ## [1.5.0] - 2026-10-01
 
 Published as [v1.5.0](https://github.com/strmax195-hue/docktui/releases/tag/v1.5.0), with a verified wheel and source distribution. The changes were merged into `main` in [PR #26](https://github.com/strmax195-hue/docktui/pull/26).

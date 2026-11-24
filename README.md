@@ -84,6 +84,10 @@ docktui status                 # one-shot table of containers, then exit
 docktui check                  # health check for scripts and monitoring
 ```
 
+On the dashboard, press `/` to find a container, then `l` for its logs or `v` for details.
+Press `?` for the shortcuts on your current screen. Use `PgUp` and `PgDn` to browse the guide,
+then `Esc` to return. For a pipe or CI job, use `docktui status --json` or `docktui check`.
+
 ## Scripting & monitoring
 
 All sub-commands accept `-H/--host`, `--docker-timeout` and `-c/--config`, and never need a TTY.
@@ -239,8 +243,8 @@ docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCK
 - **SSH** runs non-interactively: use key-based auth (agent loaded) and make sure the host key is already in `known_hosts`, otherwise SSH waits for a prompt that never comes.
 - **Plain `tcp://…:2375`** is unauthenticated and unencrypted; `docktui doctor` warns about it. Prefer `ssh://` or TLS on 2376.
 - **Connection priority:** an explicit `-H` wins; otherwise Docker environment (`DOCKER_CONTEXT`, then `DOCKER_HOST`) wins over `active_endpoint` in config, followed by Docker's current context. All snapshot, streaming and interactive commands use the same connection; DockTUI never changes your process environment. An unknown configured endpoint produces a configuration error.
-- **Endpoint switcher**: named `endpoints` in the config (or `N` on the Contexts tab) switch DockTUI's per-instance `DOCKER_HOST` without touching your shell environment. The active endpoint is shown in the title bar.
-- When `DOCKER_HOST` is set, Docker contexts are overridden; the Contexts tab says so and disables switching.
+- Open **Contexts** with `6`. Docker contexts and saved endpoints appear in one list. Filter by name or host with `/`, then press `Enter` to connect. Saved endpoints remain available when the current daemon is offline.
+- Press `n` to add and connect to a named endpoint. The title shows the active endpoint. An explicit host or Docker environment override still lets you choose a saved endpoint for this DockTUI session.
 
 ## Keyboard reference
 
@@ -254,7 +258,9 @@ docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCK
 - **`Shift+S`**: Open the in-app Settings editor.
 - **`?`**: Open the in-app keyboard help screen.
 - **`Q`**: Exit DockTUI.
-- **`Esc` while work is pending**: Cancel background operations first. Cancellation stops the local command; Docker-side work may already have started. A second press follows the current view's normal Back/Exit behavior.
+- **`PgUp`, `PgDn`, `Home`, `End`** move through resource lists, registry results, volume directories, pull output and help.
+- **`Esc`** closes the current prompt or help. In search and volume browsing it returns to the dashboard. During a foreground command it requests cancellation. Docker may already have started the operation.
+- In text fields, `Ctrl+U` clears the value. In multi-line settings and resource limits, `Ctrl+N` inserts a new line and `Enter` applies the edit.
 
 ### Containers & Compose Tabs
 - **`Ctrl+S`**: Bulk start or stop every container matching the active filter/state (asks for confirmation, runs as one `docker stop`/`docker start`).
@@ -291,7 +297,7 @@ docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCK
 - **`D`**: Delete the selected network (asks for confirmation).
 
 ### Contexts Tab
-- **`U`**: Switch active Docker context to the selected context.
+- **`Enter` or `u`** connects to the highlighted Docker context or saved endpoint.
 - **`N`**: Add a new endpoint (`name|host|description`) and activate it.
 
 ### In-View Navigation (Logs, Inspect, Exec, Details, Top, System, Settings, Search, Pull, Files Views)
@@ -324,7 +330,7 @@ docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCK
   - `Enter`: Edit the highlighted setting.
   - `O`: Export settings to a file.
   - `S`: Save the configuration.
-  - `Esc`: Return without saving.
+  - `Esc` returns to the dashboard. Edits apply to the current session until you save them.
 - **Search & Pull View Features**:
   - `Up` / `Down`: Move through search results.
   - `Enter`: Pull the highlighted image (live progress view).

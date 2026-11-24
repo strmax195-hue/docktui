@@ -385,7 +385,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     file_config = load_config(config_path)
     config = _build_config_from_args(args, file_config, config_path or Config.find_existing_path())
 
-    if getattr(args, "hosts", None):
+    if getattr(args, "hosts", None) is not None:
         if args.host:
             parser.error("--hosts cannot be combined with --host")
         if not any(name.strip() for name in args.hosts.split(",")):
@@ -402,6 +402,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     if handler is not None:
         sys.exit(handler(args, config))
 
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        parser.exit(
+            2,
+            "docktui: the dashboard needs an interactive terminal. "
+            "Use 'docktui status' for a snapshot or 'docktui check' for a health check.\n",
+        )
+
     # Pass through legacy kwargs (kept for backward compatibility with any
     # downstream callers constructing `ContainerDashboard` directly).
     dashboard = ContainerDashboard(
@@ -409,7 +416,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         docker_timeout=config.docker_timeout,
         docker_host=args.host,
         theme=config.theme,
-        exec_presets=list(config.exec_presets) if config.exec_presets else None,
+        exec_presets=list(config.exec_presets) if file_config.get("exec_presets") else None,
         log_tail_limit=config.log_tail_limit,
         config=config,
     )

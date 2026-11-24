@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from docktui.docker_client import DockerClient
+from docktui.tui import ContainerDashboard
 
 
 @unittest.skipUnless(os.environ.get("DOCKTUI_INTEGRATION") == "1", "requires real Docker")
@@ -28,6 +29,19 @@ class TestComposeIntegration(unittest.TestCase):
                     self.assertTrue(success, message)
                 rows = client.list_containers()
                 self.assertTrue(any(r["compose_project"] == project for r in rows))
+                dashboard = ContainerDashboard(docker_timeout=30)
+                self.addCleanup(dashboard.jobs.shutdown)
+                dashboard.current_tab = "compose"
+                dashboard.filters["compose"] = project
+                dashboard.refresh_data()
+                self.assertFalse(dashboard.refresh_error)
+                dashboard._handle_key_main("down")
+                selected = dashboard.current_selected_container()
+                self.assertIsNotNone(selected)
+                self.assertEqual(selected["compose_service"], "web")
+                dashboard.refresh_data()
+                self.assertFalse(dashboard.refresh_error)
+                self.assertEqual(dashboard.current_selected_container()["id"], selected["id"])
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
                     output = client.get_compose_project_logs(

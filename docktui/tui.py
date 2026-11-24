@@ -36,7 +36,13 @@ from .keymap import Keymap, resolve_hotkey_overlay
 from .log_format import _log_is_error_line, _log_matches_filter
 from .log_format import colorize_log_line as colorize_log_line
 from .log_stream import LineStreamer, StreamResult
-from .screen import clear_screen, get_terminal_size, scroll_step, viewport_height_for
+from .screen import (
+    clear_screen,
+    get_terminal_size,
+    navigation_index,
+    scroll_step,
+    viewport_height_for,
+)
 from .snapshot import DashboardSnapshot, collect_snapshot, sort_container_rows
 from .styles import (
     BOLD as BOLD,
@@ -151,10 +157,15 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.compose_rows: list[dict[str, Any]] = []
         self.active_container: Optional[dict[str, str]] = None
         self.active_project: Optional[str] = None
-        self.active_endpoint: Optional[str] = (
-            self.config.active_endpoint if self.client.host else None
-        )
         self.endpoints: list[dict[str, str]] = list(self.config.endpoints)
+        self.active_endpoint = next(
+            (
+                e["name"]
+                for e in self.endpoints
+                if e["name"] == self.config.active_endpoint and e["host"] == self.client.host
+            ),
+            None,
+        )
 
         self.selected_index = 0
         self.selected_image_index = 0
@@ -165,11 +176,13 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.current_tab = self.tabs[0]
         self.view_mode = ViewMode.MAIN
         self.previous_view_mode = ViewMode.MAIN
-        self.status_message = "Welcome to DockTUI! Use Tab or 1/2 keys to switch tabs."
+        self.status_message = "Tab or 1–6 switches tabs. Press ? for keyboard help."
         self.status_time = time.time()
         self.last_refresh = 0.0
         self.last_attempt = 0.0
         self.refresh_error = ""
+        self._failed_request: Optional[tuple[str, str, str, str]] = None
+        self._displayed: dict[str, tuple[tuple[str, str, str, str], float]] = {}
         self.refresh_interval = self.config.refresh_interval
         self.state_filter = StateFilter.ALL.value
         self.sort_mode = "default"
@@ -216,12 +229,16 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.pull_lines: list[str] = []
         self.pull_scroll_index = 0
         self.pull_image_name = ""
+        self.pull_status = ""
+        self.pull_follow = True
         self.search_results: list[dict[str, str]] = []
+        self.search_message = ""
         self.search_index = 0
         self.file_entries: list[dict[str, str]] = []
         self.file_path = "/"
         self.file_volume_name = ""
         self.file_index = 0
+        self.file_message = ""
 
         # ---------------------------------------------------------------- threading
         self.data_lock = threading.Lock()
@@ -236,6 +253,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
         # ---------------------------------------------------------------- modal
         self.input_dialog = DialogResult()
+        self.help_scroll_index = 0
         self.need_redraw = True
         self.pinned_view: Optional[ViewMode] = None
         self.pinned_target: Optional[dict[str, str]] = None
@@ -276,20 +294,49 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
     def exec_presets(self) -> list[str]:
         return list(self.config.exec_presets)
 
+    def connection_rows(self) -> list[dict[str, str]]:
+        """Keep configured endpoints available even when Docker cannot list contexts."""
+        needle = self.filters.get("contexts", "").casefold()
+        rows = [
+            row
+            for row in self.contexts
+            if not needle
+            or any(
+                needle in row.get(key, "").casefold() for key in ("name", "description", "endpoint")
+            )
+        ]
+        for endpoint in self.endpoints:
+            name, host = endpoint["name"], endpoint["host"]
+            description = str(endpoint.get("description", ""))
+            if needle and not any(
+                needle in field.casefold() for field in (name, host, description)
+            ):
+                continue
+            rows.append(
+                {
+                    "name": name,
+                    "host": host,
+                    "endpoint": host,
+                    "description": description,
+                    "current": "*" if name == self.active_endpoint else "",
+                }
+            )
+        return rows
+
     # ------------------------------------------------------------- keymap
 
     def _register_bindings(self) -> None:
         km = self.keymap
         # Global
-        km.register_global("?", self.open_help, "Open help")  # type: ignore
+        km.register_global("?", lambda _k: self.open_help(), "Open help")
         km.register_global("q", lambda _k: self._request_quit(), "Quit")
         km.register_global("\x1b", lambda _k: self._request_quit(), "Quit")
         km.register_global("m", self.cycle_theme, "Cycle theme")
         km.register_global("g", self._force_refresh, "Refresh data")
-        km.register_global("tab", lambda _k: self.cycle_tab(1), "Next tab")
-        km.register_global("/", self._start_filter_prompt, "Filter tab")
-        km.register_global("c", self._clear_filter, "Clear filter")
-        km.register_global("\t", lambda _k: self.cycle_tab(1), "Next tab")  # tab already above
+        km.register("main", "tab", lambda _k: self.cycle_tab(1), "Next tab")
+        km.register("main", "\t", lambda _k: self.cycle_tab(1), "Next tab")
+        km.register("main", "/", self._start_filter_prompt, "Filter tab")
+        km.register("main", "c", self._clear_filter, "Clear filter")
         # Help / back navigation is per-view (see _handle_key).
 
     # ------------------------------------------------------------- status
@@ -329,15 +376,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
     def refresh_worker(self) -> None:
         while not self.stop_refresh.is_set():
-            interval = self.refresh_interval
-            if self.current_tab == "images":
-                interval = self.config.refresh_interval_images
-            elif self.current_tab == "volumes":
-                interval = self.config.refresh_interval_volumes
-            elif self.current_tab == "networks":
-                interval = self.config.refresh_interval_networks
-
-            self.refresh_requested.wait(timeout=interval)
+            self.refresh_requested.wait(timeout=self._tab_refresh_interval())
             self.refresh_requested.clear()
             if self.stop_refresh.is_set():
                 break
@@ -345,6 +384,13 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                 self.refresh_data()
             except Exception:
                 pass
+
+    def _tab_refresh_interval(self) -> float:
+        return {
+            "images": self.config.refresh_interval_images,
+            "volumes": self.config.refresh_interval_volumes,
+            "networks": self.config.refresh_interval_networks,
+        }.get(self.current_tab, self.refresh_interval)
 
     def is_daemon_running_cached(self, force: bool = False) -> bool:
         if self._running:
@@ -363,6 +409,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         callback: Callable[[str], None],
         cancel_callback: Optional[Callable[[], None]] = None,
         initial: str = "",
+        multiline: bool = False,
     ) -> None:
         self.previous_view_mode = self.view_mode
         self.view_mode = ViewMode.INPUT
@@ -371,6 +418,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             buffer=initial,
             submit=callback,
             cancel=cancel_callback,
+            multiline=multiline,
         )
         self.need_redraw = True
 
@@ -399,7 +447,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if key == "enter":
             self.submit_input()
             return
-        if key in ("\x1b", "q"):
+        if key == "\x1b":
             self.cancel_input()
             return
         if apply_dialog_key(self.input_dialog, key):
@@ -462,7 +510,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self._export_lines_to_file(self.pull_lines, "Pull Progress", filepath)
 
     def export_files_to_file(self, filepath: str) -> None:
-        lines = [f"{e['name']} ({e['type']}) - {e['size']}" for e in self.file_entries]
+        lines = [f"{e['mode']}  {e['size']:>10}  {e['name']}" for e in self.file_entries]
         self._export_lines_to_file(lines, "Files", filepath)
 
     # ------------------------------------------------------------- data shaping
@@ -782,32 +830,50 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.sort_mode,
         )
 
+    def _visible_snapshot_time(self) -> float:
+        slot = "containers" if self.current_tab == "compose" else self.current_tab
+        saved = self._displayed.get(slot)
+        return saved[1] if saved and saved[0] == self._snapshot_request() else 0.0
+
     def _apply_snapshot(self, snapshot: DashboardSnapshot) -> None:
         self.current_context = snapshot.context
         if snapshot.tab in ("containers", "compose"):
-            selected = self.current_selected_container()
-            cid = selected.get("id") if selected else None
-            project = None
-            if self.compose_rows and self.selected_compose_index < len(self.compose_rows):
-                project = self.compose_rows[self.selected_compose_index].get("project")
+            cid = self.containers[self.selected_index]["id"] if self.containers else None
+            selected_row = (
+                self.compose_rows[self.selected_compose_index] if self.compose_rows else {}
+            )
             self.containers, self.stats = snapshot.items, snapshot.stats
             self.build_compose_rows()
             self.selected_index = next(
                 (i for i, row in enumerate(self.containers) if row.get("id") == cid),
                 min(self.selected_index, max(0, len(self.containers) - 1)),
             )
-            self.selected_compose_index = next(
-                (
-                    i
+            if selected_row.get("type") == "container":
+                # A refresh must never widen a service action to the whole project.
+                service_id = selected_row["container"]["id"]
+                candidates = [
+                    (i, row)
                     for i, row in enumerate(self.compose_rows)
-                    if (row.get("container") or {}).get("id") == cid
-                    and cid is not None
-                    or row.get("type") == "project"
-                    and row.get("project") == project
-                    and project is not None
-                ),
-                0,
-            )
+                    if row["type"] == "container"
+                ]
+                for i, row in candidates:
+                    if row["container"]["id"] == service_id:
+                        self.selected_compose_index = i
+                        break
+                else:
+                    self.selected_compose_index = next(
+                        (i for i, row in candidates if row["project"] == selected_row["project"]),
+                        candidates[0][0] if candidates else 0,
+                    )
+            elif selected_row:
+                self.selected_compose_index = next(
+                    (
+                        i
+                        for i, row in enumerate(self.compose_rows)
+                        if row["type"] == "project" and row["project"] == selected_row["project"]
+                    ),
+                    0,
+                )
         else:
             attrs = {
                 "images": "selected_image_index",
@@ -816,28 +882,47 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                 "contexts": "selected_context_index",
             }
             attr = attrs[snapshot.tab]
-            old = getattr(self, snapshot.tab)
+            old = (
+                self.connection_rows()
+                if snapshot.tab == "contexts"
+                else getattr(self, snapshot.tab)
+            )
             index = getattr(self, attr)
-            key = "id" if snapshot.tab in ("images", "networks") else "name"
-            selected = old[index].get(key) if old and index < len(old) else None
+            keys = {
+                "images": ("id", "repository", "tag"),
+                "networks": ("id",),
+                "volumes": ("name",),
+                "contexts": ("name", "host"),
+            }[snapshot.tab]
+            selected_key = tuple(old[index].get(key) for key in keys) if index < len(old) else None
             setattr(self, snapshot.tab, snapshot.items)
+            rows = self.connection_rows() if snapshot.tab == "contexts" else snapshot.items
             setattr(
                 self,
                 attr,
                 next(
-                    (i for i, row in enumerate(snapshot.items) if row.get(key) == selected),
-                    min(index, max(0, len(snapshot.items) - 1)),
+                    (
+                        i
+                        for i, row in enumerate(rows)
+                        if tuple(row.get(key) for key in keys) == selected_key
+                    ),
+                    min(index, max(0, len(rows) - 1)),
                 ),
             )
-        self.daemon_running = True
+        if snapshot.tab != "contexts":
+            self.daemon_running = True
         self.last_daemon_check = time.time()
         self.last_refresh = time.time()
+        slot = "containers" if snapshot.tab == "compose" else snapshot.tab
+        self._displayed[slot] = (self._snapshot_request(), self.last_refresh)
         self.refresh_error = ""
+        self._failed_request = None
         self.refresh_in_progress = False
         self.need_redraw = True
 
     def _refresh_failed(self, exc: Exception) -> None:
         self.refresh_error = str(exc)
+        self._failed_request = self._snapshot_request()
         self.refresh_in_progress = False
         self.set_status(f"Refresh failed; keeping last snapshot: {exc}")
         self.need_redraw = True
@@ -857,9 +942,14 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                 self.refresh_in_progress = False
                 self.request_refresh()
 
-        if self.jobs.submit(
-            "refresh", self.client.connection_generation, work, apply, self._refresh_failed
-        ):
+        def failed(exc):
+            if request == self._snapshot_request():
+                self._refresh_failed(exc)
+            else:
+                self.refresh_in_progress = False
+                self.request_refresh()
+
+        if self.jobs.submit("refresh", self.client.connection_generation, work, apply, failed):
             self.refresh_in_progress = True
             self.last_attempt = time.time()
 
@@ -882,10 +972,26 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         finally:
             self.refresh_in_progress = False
 
-    def _docker_job(self, key: str, method: str, args: tuple, apply: Callable, **kwargs) -> None:
+    def _docker_job(
+        self,
+        key: str,
+        method: str,
+        args: tuple,
+        apply: Callable,
+        *,
+        on_error: Optional[Callable[[Exception], None]] = None,
+        **kwargs,
+    ) -> None:
         client = self.client.snapshot(context=self.current_context or None)
         if not self._running:
-            apply(getattr(client, method)(*args, **kwargs))
+            try:
+                value = getattr(client, method)(*args, **kwargs)
+            except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+                if on_error is None:
+                    raise
+                on_error(exc)
+            else:
+                apply(value)
             return
 
         if key.startswith("view:"):
@@ -908,7 +1014,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.client.connection_generation,
             work,
             apply,
-            lambda exc: self.set_status(f"Operation failed: {exc}"),
+            on_error or (lambda exc: self.set_status(f"Operation failed: {exc}")),
         ):
             self.set_status("Working… Esc cancels the operation.")
         else:
@@ -1018,14 +1124,11 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         option = self.settings_options[self.settings_index]
         key = option["key"]
         kind = option["kind"]
-        if kind == "list":
+        if key == "exec_presets":
+            current = "\n".join(self.config.exec_presets)
+        elif key == "log_highlights":
             current = "\n".join(
-                item.get("value", "") if isinstance(item, dict) else str(item)
-                for item in (
-                    self.config.exec_presets
-                    if key == "exec_presets"
-                    else self.config.log_highlights
-                )
+                f"{h.get('label', '')}={h['pattern']}" for h in self.config.log_highlights
             )
         else:
             current = str(getattr(self.config, key))
@@ -1044,26 +1147,30 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                             line.strip() for line in value.splitlines() if line.strip()
                         ]
                     elif key == "log_highlights":
-                        self.config.log_highlights = []
+                        patterns = []
                         for line in value.splitlines():
                             if not line.strip():
                                 continue
-                            label, pattern = (line.split("=", 1) + [""])[:2]
-                            self.config.log_highlights.append(
-                                {
-                                    "label": label.strip(),
-                                    "pattern": pattern.strip(),
-                                }
-                            )
-                        self.config.save()
-            except (ValueError, OSError) as e:
-                self.set_status(f"Update/save failed: {e}")
+                            label, separator, pattern = line.partition("=")
+                            if not separator or not pattern.strip():
+                                raise ValueError("Enter each highlight as label=pattern.")
+                            re.compile(pattern.strip())
+                            patterns.append({"label": label.strip(), "pattern": pattern.strip()})
+                        self.config.log_highlights = patterns
+            except (ValueError, re.error) as e:
+                self.set_status(f"Update failed: {e}")
                 return
             self.config.validate()
             self._apply_runtime_config()
             self.set_status(f"Updated {key}.")
 
-        self.start_input(f"New value for {option['label']} [{kind}]: ", submit, initial=current)
+        form = "label=pattern" if key == "log_highlights" else kind
+        self.start_input(
+            f"New value for {option['label']} [{form}]: ",
+            submit,
+            initial=current,
+            multiline=kind == "list",
+        )
 
     def _apply_runtime_config(self) -> None:
         """Sync runtime fields with the (possibly edited) config."""
@@ -1088,9 +1195,21 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         def submit(query: str) -> None:
             if not query:
                 return
-            self._load_output("search_results", "search_images", query)
+            self.search_results = []
             self.search_index = 0
+            self.search_message = f"Searching Docker Hub for {query}…"
             self.view_mode = ViewMode.SEARCH
+
+            def apply(rows):
+                self.search_results = rows
+                self.search_message = "" if rows else f"No images match {query}."
+                self.need_redraw = True
+
+            def failed(exc):
+                self.search_message = f"Search failed: {exc}"
+                self.need_redraw = True
+
+            self._docker_job("view:search", "search_images", (query,), apply, on_error=failed)
 
         self.start_input("Search Docker Hub: ", submit)
 
@@ -1102,43 +1221,55 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.pull_image_name = repo
         self.pull_lines = []
         self.pull_scroll_index = 0
+        self.pull_follow = True
+        self.pull_status = f"Pulling {repo}…"
         self.view_mode = ViewMode.PULL_PROGRESS
 
         def on_line(line: str) -> None:
+            if self.pull_streamer is not streamer:
+                return
+            if len(self.pull_lines) >= self.config.log_max and not self.pull_follow:
+                self.pull_scroll_index = max(0, self.pull_scroll_index - 1)
             self.pull_lines.append(line)
             del self.pull_lines[: -self.config.log_max]
             self.need_redraw = True
 
         def on_complete(result: StreamResult) -> None:
+            if self.pull_streamer is not streamer:
+                return
             if result.cancelled:
-                self.set_status(f"Pull of {repo} canceled.")
+                self.pull_status = f"Pull of {repo} canceled."
+            elif result.error:
+                self.pull_status = result.error
             elif result.returncode == 0:
-                self.set_status(f"Pull of {repo} finished.")
+                self.pull_status = f"Pull of {repo} finished."
                 self.request_refresh()
             else:
-                self.set_status(f"Pull of {repo} failed (exit {result.returncode}).")
-            self.need_redraw = True
+                self.pull_status = f"Pull of {repo} failed (exit {result.returncode})."
+            self.set_status(self.pull_status)
 
         generation = self.client.connection_generation
+        command = self.client.pull_image_args(repo)
+        if not command:
+            self.pull_streamer = None
+            self.pull_status = "Docker CLI not found in PATH."
+            self.set_status(self.pull_status)
+            return
         streamer = LineStreamer(
-            self.client.pull_image_args(repo),
+            command,
             on_line=lambda line: self._post_ui(lambda: on_line(line), generation, line=True),
             on_complete=lambda result: self._post_ui(lambda: on_complete(result), generation),
             max_lines=self.config.log_max,
             env=self.client.command_env(),
         )
+        self.pull_streamer = streamer
         err = streamer.start()
         if err is not None:
             self.pull_lines.append(err)
-            self.set_status(err)
-            return
-        self.pull_streamer = streamer
 
     def cancel_pull(self) -> None:
-        if self.pull_streamer is not None:
+        if self.pull_streamer is not None and self.pull_streamer.result is None:
             self.pull_streamer.stop()
-            self.pull_streamer = None
-        self.set_status("Pull canceled.")
         self.view_mode = ViewMode.MAIN
 
     # ------------------------------------------------------------- volume files
@@ -1155,14 +1286,28 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
     def _load_file_entries(self) -> None:
         target = (self.file_volume_name, self.file_path)
+        self.file_entries = []
+        self.file_index = 0
+        self.file_message = "Reading directory…"
 
         def apply(entries):
             if target == (self.file_volume_name, self.file_path):
                 self.file_entries = [e for e in entries if e.get("name") not in (".", "..")]
-                self.file_index = 0
+                self.file_message = "" if self.file_entries else "This directory is empty."
                 self.need_redraw = True
 
-        self._docker_job("view:files", "list_volume_contents", (target[0],), apply, path=target[1])
+        def failed(exc):
+            self.file_message = f"Cannot read directory: {exc}"
+            self.need_redraw = True
+
+        self._docker_job(
+            "view:files",
+            "list_volume_contents",
+            (target[0],),
+            apply,
+            on_error=failed,
+            path=target[1],
+        )
 
     def _file_open(self) -> None:
         if not self.file_entries:
@@ -1229,6 +1374,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             "Set cpus and memory_mb (one per line):",
             submit,
             initial=initial,
+            multiline=True,
         )
 
     # ------------------------------------------------------------- container clone
@@ -1270,51 +1416,57 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
     def new_endpoint_prompt(self) -> None:
         def submit(value: str) -> None:
-            parts = [p.strip() for p in value.split("|")]
-            if len(parts) < 2:
+            parts = [p.strip() for p in value.split("|", 2)]
+            if len(parts) < 2 or not all(parts[:2]):
                 self.set_status("Format: <name>|<host>|[description]")
                 return
             name, host = parts[0], parts[1]
+            if any(e["name"] == name for e in self.endpoints):
+                self.set_status(f"Endpoint {name} already exists.")
+                return
             description = parts[2] if len(parts) > 2 else ""
-            self.endpoints.append({"name": name, "host": host, "description": description})
+            endpoint = {"name": name, "host": host, "description": description}
+            self.endpoints.append(endpoint)
             self.config.endpoints = list(self.endpoints)
-            self.set_status(f"Added endpoint {name} -> {host}.")
+            self._activate_endpoint(endpoint)
             try:
                 self.config.save()
             except (OSError, ValueError) as exc:
                 self.set_status(f"Endpoint added for this session; save failed: {exc}")
 
-        self.start_input("New endpoint: name|host|description (description optional): ", submit)
+        self.start_input("Add and connect to endpoint (name|host|description): ", submit)
 
     def use_selected_context(self) -> None:
-        if self.client.docker_host or os.environ.get("DOCKER_CONTEXT"):
-            self.set_status("Cannot switch context: DOCKER_HOST is active and overrides context.")
+        rows = self.connection_rows()
+        if self.current_tab != "contexts" or not rows:
             return
-        if self.current_tab == "contexts" and self.contexts:
-            sel_ctx = self.contexts[self.selected_context_index]
-            self.set_status(f"Switching Docker context to {sel_ctx['name']}...")
-            name = sel_ctx["name"]
-
-            def apply(result):
-                ok, message = result
-                if ok:
-                    self._reset_connection_state()
-                    self.client.set_context(name)
-                    self.current_context = name
-                    self.active_endpoint = None
-                    self.config.active_endpoint = None
-                    self.refresh_data()
-                self.set_status(message)
-
-            self._docker_job("action", "use_context", (name,), apply)
+        selected = rows[self.selected_context_index]
+        if "host" in selected:
+            self._activate_endpoint(selected)
             return
-        if self.endpoints:
-            entry = (
-                self.endpoints[self.selected_endpoint_index]
-                if hasattr(self, "selected_endpoint_index")
-                else self.endpoints[0]
-            )
-            self._activate_endpoint(entry)
+        if (
+            self.client.host
+            and not self.active_endpoint
+            or os.environ.get("DOCKER_HOST")
+            or os.environ.get("DOCKER_CONTEXT")
+        ):
+            self.set_status("A Docker host or context override is active. Choose a named endpoint.")
+            return
+        name = selected["name"]
+        self.set_status(f"Switching Docker context to {name}...")
+
+        def apply(result):
+            ok, message = result
+            if ok:
+                self._reset_connection_state()
+                self.client.set_context(name)
+                self.current_context = name
+                self.active_endpoint = None
+                self.config.active_endpoint = None
+                self.refresh_data()
+            self.set_status(message)
+
+        self._docker_job("action", "use_context", (name,), apply)
 
     def _activate_endpoint(self, endpoint: dict[str, str]) -> None:
         host = endpoint.get("host")
@@ -1325,6 +1477,14 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.client.set_host(host)
         self.active_endpoint = endpoint.get("name")
         self.config.active_endpoint = self.active_endpoint
+        self.selected_context_index = next(
+            (
+                i
+                for i, row in enumerate(self.connection_rows())
+                if row.get("host") == host and row["name"] == self.active_endpoint
+            ),
+            0,
+        )
         self.set_status(f"Switched to endpoint {endpoint.get('name', '?')} ({host}).")
         self.refresh_data()
 
@@ -1358,7 +1518,12 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.pinned_target = None
             self.pinned_project = None
             self.selected_index = self.selected_compose_index = 0
+            self.selected_context_index = 0
             self.last_refresh = 0.0
+            self.current_context = ""
+            self.refresh_error = ""
+            self._displayed.clear()
+            self._failed_request = None
             self.daemon_running = False
             self.last_daemon_check = 0.0
 
@@ -1408,6 +1573,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
     def open_help(self) -> None:
         if self.view_mode != ViewMode.HELP:
             self.previous_view_mode = self.view_mode
+            self.help_scroll_index = 0
         self.view_mode = ViewMode.HELP
         self.need_redraw = True
 
@@ -1634,6 +1800,30 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
     # ------------------------------------------------------------- key handling
 
     def _handle_key_main(self, key: str) -> bool:
+        if self._displayed and self.current_tab != "contexts" and not self._visible_snapshot_time():
+            # The visible criteria can change while the old Docker rows still exist.
+            # Never send a command to a resource from the previous filter or tab.
+            if key in (
+                "s",
+                "r",
+                "l",
+                "v",
+                "i",
+                "t",
+                "e",
+                "x",
+                "w",
+                "C",
+                "n",
+                "F",
+                "d",
+                "u",
+                "b",
+                "\x13",
+            ) or resolve_hotkey_overlay(self.config.hotkey_overlays, key):
+                self.request_refresh()
+                self.set_status("Waiting for the current list to load.")
+                return True
         if key == "\x13" and self.current_tab in ("containers", "compose"):
             self.bulk_start_stop()
             return True
@@ -1649,11 +1839,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             self.set_status(f"Switched tab to {self.current_tab}.")
             self.refresh_data()
             return True
-        if key in ("up", "scroll_up"):
-            self._move_selection(-1)
-            return True
-        if key in ("down", "scroll_down"):
-            self._move_selection(1)
+        if self._move_selection(key):
             return True
         if key == "o" and self.current_tab in ("containers", "compose"):
             self._cycle_sort_mode()
@@ -1712,7 +1898,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         # Compose tab extras
         if key in ("u", "d", "b") and self.current_tab == "compose":
             return self._handle_compose_action_key(key)
-        if key == "u" and self.current_tab == "contexts":
+        if key in ("u", "enter") and self.current_tab == "contexts":
             self.use_selected_context()
             return True
         if key == "n" and self.current_tab == "contexts":
@@ -1927,27 +2113,33 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if key == "s":
             self.save_settings()
             return True
+        if key == "o":
+            self.start_input("Export settings to path: ", self.export_settings_to_file)
+            return True
         if key in ("\x1b", "q"):
             self.view_mode = ViewMode.MAIN
             return True
         return False
 
     def _handle_key_search(self, key: str) -> bool:
-        if not self.search_results:
-            if key in ("\x1b", "q"):
-                self.view_mode = ViewMode.IMAGES if self.current_tab == "images" else ViewMode.MAIN  # type: ignore
+        if key in ("\x1b", "q"):
+            self.jobs.cancel_prefix("view:search:")
+            self.view_mode = ViewMode.MAIN
             return True
-        if key in ("up", "scroll_up"):
-            self.search_index = max(0, self.search_index - 1)
+        if key in ("/", "f"):
+            self.start_registry_search()
             return True
-        if key in ("down", "scroll_down"):
-            self.search_index = min(len(self.search_results) - 1, self.search_index + 1)
+        index = navigation_index(
+            key, self.search_index, len(self.search_results) - 1, get_terminal_size().height - 7
+        )
+        if index is not None:
+            self.search_index = index
             return True
         if key == "enter":
             self._pull_selected_image()
             return True
-        if key in ("\x1b", "q"):
-            self.view_mode = ViewMode.IMAGES if self.current_tab == "images" else ViewMode.MAIN  # type: ignore
+        if key == "o":
+            self.start_input("Export search results to path: ", self.export_search_to_file)
             return True
         return False
 
@@ -1955,18 +2147,26 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if key in ("\x1b", "q"):
             self.cancel_pull()
             return True
-        return True
+        if key == "o":
+            self.start_input("Export pull output to path: ", self.export_pull_progress_to_file)
+            return True
+        page = max(1, get_terminal_size().height - 7)
+        last = max(0, len(self.pull_lines) - page)
+        index = navigation_index(
+            key, last if self.pull_follow else self.pull_scroll_index, last, page
+        )
+        if index is not None:
+            self.pull_scroll_index = index
+            self.pull_follow = index == last
+            return True
+        return False
 
     def _handle_key_files(self, key: str) -> bool:
-        if not self.file_entries:
-            if key in ("\x1b", "q", "backspace"):
-                self.view_mode = ViewMode.MAIN
-            return True
-        if key in ("up", "scroll_up"):
-            self.file_index = max(0, self.file_index - 1)
-            return True
-        if key in ("down", "scroll_down"):
-            self.file_index = min(len(self.file_entries) - 1, self.file_index + 1)
+        index = navigation_index(
+            key, self.file_index, len(self.file_entries) - 1, get_terminal_size().height - 7
+        )
+        if index is not None:
+            self.file_index = index
             return True
         if key == "enter":
             self._file_open()
@@ -1974,7 +2174,11 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         if key == "backspace":
             self._file_up()
             return True
+        if key == "o":
+            self.start_input("Export directory listing to path: ", self.export_files_to_file)
+            return True
         if key in ("\x1b", "q"):
+            self.jobs.cancel_prefix("view:files:")
             self.view_mode = ViewMode.MAIN
             return True
         return False
@@ -1982,8 +2186,9 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
     def _handle_key_help(self, key: str) -> bool:
         if key in ("?", "q", "\x1b"):
             self.close_help()
-            return True
-        return False
+        else:
+            self.scroll_help(key)
+        return True
 
     # ------------------------------------------------------------- key helpers
 
@@ -2017,21 +2222,25 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
             return True
         return False
 
-    def _move_selection(self, delta: int) -> None:
+    def _move_selection(self, key: str) -> bool:
         attrs = {
             "containers": ("selected_index", self.containers),
             "compose": ("selected_compose_index", self.compose_rows),
             "images": ("selected_image_index", self.images),
             "volumes": ("selected_volume_index", self.volumes),
             "networks": ("selected_network_index", self.networks),
-            "contexts": ("selected_context_index", self.contexts),
+            "contexts": (
+                "selected_context_index",
+                self.connection_rows() if self.current_tab == "contexts" else [],
+            ),
         }
         attr, items = attrs.get(self.current_tab, ("selected_index", self.containers))
-        if not items:
-            return
-        current = getattr(self, attr)
-        new = max(0, min(len(items) - 1, current + delta))
+        page = self._list_clipped[1] - self._list_clipped[0] if self._list_clipped else len(items)
+        new = navigation_index(key, getattr(self, attr), len(items) - 1, page)
+        if new is None:
+            return False
         setattr(self, attr, new)
+        return True
 
     def _cycle_sort_mode(self) -> None:
         modes = ["default", "name", "image", "state"]
@@ -2331,8 +2540,10 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                     self.need_redraw = False
                     self.draw_current()
 
-                if self.view_mode == ViewMode.MAIN and (
-                    time.time() - self.last_attempt > self.refresh_interval
+                if (
+                    self.view_mode == ViewMode.MAIN
+                    and not self.refresh_in_progress
+                    and (time.time() - self.last_attempt > self._tab_refresh_interval())
                 ):
                     self.request_refresh()
                 log_pinned = self.pinned_view == ViewMode.LOGS and self.view_mode in (
@@ -2356,16 +2567,18 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                     time.sleep(0.04)
                     continue
                 self.need_redraw = True
-                if key == "\x1b" and self.jobs.busy:
-                    self.jobs.cancel_all()
-                    self.refresh_in_progress = False
-                    self.set_status(
-                        "Operation canceled; Docker-side work may already have started."
-                    )
-                    continue
                 if self.view_mode == ViewMode.INPUT:
                     self.handle_input_key(key)
-                    time.sleep(0.08)
+                    continue
+                if (
+                    key == "\x1b"
+                    and self.view_mode
+                    not in (ViewMode.HELP, ViewMode.SEARCH, ViewMode.FILES, ViewMode.PULL_PROGRESS)
+                    and self.jobs.cancel_foreground()
+                ):
+                    self.set_status(
+                        "Operation canceled. Docker-side work may already have started."
+                    )
                     continue
                 if key == "mouse":
                     self.set_status("Mouse click detected. Scroll to navigate list/logs.")
