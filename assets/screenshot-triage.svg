@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="775" height="466" viewBox="0 0 775 466" role="img" aria-label="docktui demo — investigating the checkout API">
+<title>docktui demo — investigating the checkout API</title>
+<rect width="775" height="466" rx="10" fill="#0d1117"/>
+<rect x="0.5" y="0.5" width="774" height="465" rx="10" fill="none" stroke="#30363d"/>
+<path d="M0 34H775" stroke="#30363d"/>
+<circle cx="20" cy="17" r="6" fill="#ff5f56"/>
+<circle cx="40" cy="17" r="6" fill="#ffbd2e"/>
+<circle cx="60" cy="17" r="6" fill="#27c93f"/>
+<text x="387.5" y="22" text-anchor="middle" font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#8b949e">docktui demo — investigating the checkout API</text>
+<g font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" style="white-space:pre">
+<text x="18.0" y="65.5" fill="#39c5cf" font-weight="bold" textLength="436.8" lengthAdjust="spacingAndGlyphs">DockTUI  /  Triage     Offline demo  /  checkout-lab</text>
+<text x="18.0" y="83.5" fill="#39c5cf" textLength="730.8" lengthAdjust="spacingAndGlyphs">───────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="18.0" y="101.5" fill="#ff7b72" textLength="201.6" lengthAdjust="spacingAndGlyphs">CRITICAL  checkout-api-1</text>
+<text x="18.0" y="119.5" fill="#c9d1d9" textLength="310.8" lengthAdjust="spacingAndGlyphs">Last listed  Up 8 minutes (unhealthy)</text>
+<text x="18.0" y="137.5" fill="#c9d1d9" textLength="193.2" lengthAdjust="spacingAndGlyphs">Compose  checkout / api</text>
+<text x="18.0" y="155.5" fill="#c9d1d9" textLength="361.2" lengthAdjust="spacingAndGlyphs">Image  checkout/api:2.8    ID  000000000001</text>
+<text x="18.0" y="173.5" fill="#c9d1d9" textLength="243.6" lengthAdjust="spacingAndGlyphs">healthcheck reports unhealthy</text>
+<text x="18.0" y="209.5" fill="#39c5cf" textLength="84.0" lengthAdjust="spacingAndGlyphs">Inspection</text>
+<text x="18.0" y="227.5" fill="#c9d1d9" textLength="184.8" lengthAdjust="spacingAndGlyphs">Current state  running</text>
+<text x="18.0" y="245.5" fill="#c9d1d9" textLength="142.8" lengthAdjust="spacingAndGlyphs">Health  unhealthy</text>
+<text x="18.0" y="263.5" fill="#c9d1d9" textLength="268.8" lengthAdjust="spacingAndGlyphs">Last probe  exit 1  09:41:10 UTC</text>
+<text x="18.0" y="281.5" fill="#c9d1d9" textLength="369.6" lengthAdjust="spacingAndGlyphs">GET /ready -&gt; 503  database schema is behind</text>
+<text x="18.0" y="299.5" fill="#c9d1d9" textLength="134.4" lengthAdjust="spacingAndGlyphs">Restart count  0</text>
+<text x="18.0" y="335.5" fill="#39c5cf" textLength="92.4" lengthAdjust="spacingAndGlyphs">Recent logs</text>
+<text x="18.0" y="353.5" fill="#c9d1d9" textLength="336.0" lengthAdjust="spacingAndGlyphs">09:41:03 INFO  Serving HTTP on port 8080</text>
+<text x="18.0" y="371.5" fill="#c9d1d9" textLength="327.6" lengthAdjust="spacingAndGlyphs">09:41:04 INFO  Connected to checkout-db</text>
+<text x="18.0" y="389.5" fill="#ff7b72" textLength="428.4" lengthAdjust="spacingAndGlyphs">09:41:05 ERROR Schema version 18 required, found 17</text>
+<text x="18.0" y="407.5" fill="#d29922" textLength="319.2" lengthAdjust="spacingAndGlyphs">09:41:10 WARN  GET /ready returned 503</text>
+<text x="18.0" y="425.5" fill="#c9d1d9" textLength="730.8" lengthAdjust="spacingAndGlyphs">───────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="18.0" y="443.5" fill="#39c5cf" textLength="361.2" lengthAdjust="spacingAndGlyphs">Esc Back   ↑/↓ Scroll   r Refresh   q Leave</text>
+</g></svg>

@@ -1,10 +1,12 @@
 """Command-line entry point for DockTUI.
 
 ``docktui`` with no sub-command opens the interactive dashboard. The
-sub-commands are non-interactive and script-friendly:
+sub-commands also work in pipes and scripts:
 
 * ``docktui status``  – one-shot container table (or ``--json``)
 * ``docktui check``   – health check with Nagios-compatible exit codes
+* ``docktui triage``  – inspect container health, exits and recent logs
+* ``docktui demo``    – try triage on a bundled offline incident
 * ``docktui doctor``  – diagnose Docker / config / terminal problems
 * ``docktui config``  – show, locate, or initialise the config file
 """
@@ -107,6 +109,26 @@ def build_parser() -> argparse.ArgumentParser:
     _add_connection_args(parser)
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+    for command, description in (
+        ("demo", "Explore a sample incident offline. No Docker setup required."),
+        ("triage", "Find containers needing attention and open their probe and logs."),
+    ):
+        view = sub.add_parser(command, help=description, description=description)
+        if command == "triage":
+            _add_connection_args(view, suppress=True)
+        view.add_argument(
+            "container",
+            nargs="?",
+            metavar="CONTAINER",
+            help="Print evidence for an exact container name or short ID.",
+        )
+        view.add_argument("--all", action="store_true", help="Include containers without findings.")
+        view.add_argument(
+            "--plain",
+            action="store_true",
+            help="Print once and exit. Automatic when input or output is redirected.",
+        )
 
     p_status = sub.add_parser(
         "status",
@@ -332,6 +354,32 @@ def cmd_check(args: argparse.Namespace, config: Config) -> int:
     return overall_level(findings)
 
 
+def cmd_triage(args: argparse.Namespace, config: Config) -> int:
+    from . import styles
+    from .demo import DemoSource
+    from .triage import DockerSource, Source, plain_line, plain_report
+    from .views.triage import TriageScreen, run_screen
+
+    source: Source = (
+        DemoSource()
+        if args.command == "demo"
+        else DockerSource(DockerClient(timeout=config.docker_timeout, host=args.host))
+    )
+    try:
+        if args.container or args.plain or not (sys.stdin.isatty() and sys.stdout.isatty()):
+            output, code = plain_report(source, args.container, args.all)
+            print(output)
+            return code
+        styles.apply_theme_colors(config.theme)
+        run_screen(TriageScreen(source, config.refresh_interval, args.all))
+        return 0
+    except (DockerError, OSError, subprocess.SubprocessError) as exc:
+        print(f"docktui {args.command}: {plain_line(str(exc))}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
 def cmd_doctor(args: argparse.Namespace, config: Config) -> int:
     from .doctor import FAIL, format_results, run_checks
 
@@ -362,6 +410,7 @@ def cmd_config(args: argparse.Namespace, config: Config) -> int:
 
 
 COMMANDS = {
+    "triage": cmd_triage,
     "status": cmd_status,
     "ps": cmd_status,
     "check": cmd_check,
@@ -378,6 +427,9 @@ def main(argv: Optional[list[str]] = None) -> None:
             setattr(args, name, None)
     if args.no_color:
         os.environ["NO_COLOR"] = "1"
+
+    if args.command == "demo":
+        sys.exit(cmd_triage(args, _build_config_from_args(args, {})))
 
     config_path = args.config.expanduser() if args.config else None
     if config_path is not None and not config_path.is_file() and args.command != "config":

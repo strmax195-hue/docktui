@@ -49,7 +49,7 @@ def main() -> None:
             ],
             check=True,
         )
-        for arguments in (["--version"], ["--help"], ["config", "show"]):
+        for arguments in (["--version"], ["--help"], ["config", "show"], ["demo", "--plain"]):
             subprocess.run(
                 [str(root / "venv" / "bin" / "docktui"), *arguments], cwd=root, check=True
             )
@@ -60,6 +60,11 @@ def main() -> None:
         )
         if version not in output:
             raise ValueError("Installed wheel version differs")
+        evidence = subprocess.check_output(
+            [str(python), "-I", "-m", "docktui", "demo", "checkout-api-1"], cwd=root, text=True
+        )
+        if "Schema version 18 required" not in evidence:
+            raise ValueError("Installed wheel could not open the offline incident")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from ..screen import (
 _HELP_TOPICS = {
     "Dashboard": (
         "Tab / 1–6       Switch resource tabs",
+        "!               Find unhealthy, restarting and crashed containers",
         "↑ / ↓ / wheel   Move the selection",
         "PgUp / PgDn     Move one page • Home / End jumps to either end",
         "/ / c           Set or clear the tab filter",

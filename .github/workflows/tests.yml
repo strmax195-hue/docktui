@@ -61,6 +61,7 @@ jobs:
           docktui --version
           docktui --help
           docktui config show
+          docktui demo checkout-api-1 --plain
 
   integration:
     name: Integration (real Docker daemon)
@@ -123,6 +124,18 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 2
+
+      - name: Open triage and read a failed Docker health probe
+        run: |
+          python - <<'PYTRIAGE'
+          import subprocess
+          def report(*args):
+              return subprocess.check_output(["docktui", "triage", "--plain", *args], text=True)
+          queue = report()
+          assert "ci-unhealthy" in queue and "ci-crashed" in queue and "ci-healthy" not in queue, queue
+          evidence = report("ci-unhealthy")
+          assert "Last probe  exit 1" in evidence and "Health  unhealthy" in evidence, evidence
+          PYTRIAGE
 
       - name: docktui check passes when problems are excluded (exit 0)
         run: docktui check --exclude ci-unhealthy --exclude ci-crashed --require 'ci-healthy'

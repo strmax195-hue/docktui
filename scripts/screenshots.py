@@ -9,6 +9,10 @@ Usage (needs Docker, plus `pip install pyte`):
     scripts/demo/up.sh                 # start the demo Compose stacks
     python scripts/screenshots.py      # writes assets/screenshot-*.svg
 
+The triage screen can also be captured without Docker:
+
+    python scripts/screenshots.py screenshot-triage.svg
+
 `pyte` is only needed for this script; DockTUI itself stays dependency-free.
 """
 
@@ -262,6 +266,12 @@ def main():
     py = sys.executable
     ASSETS.mkdir(exist_ok=True)
     shots = {
+        "screenshot-triage.svg": (
+            "docktui demo — investigating the checkout API",
+            lambda: run_in_terminal(
+                [py, "-m", "docktui", "demo"], 88, 25, keys=[("\r", 0.6)], settle=0.6
+            ),
+        ),
         "screenshot-dashboard.svg": (
             "docktui — containers with pinned live logs",
             lambda: run_in_terminal(
