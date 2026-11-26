@@ -18,11 +18,73 @@ def wait_for_pty_exit(process, master, timeout=5):
     return process.wait(timeout=1)
 
 
+def expect_pty_output(process, master, needle):
+    import select
+
+    data = b""
+    deadline = time.monotonic() + 6
+    while needle not in data and time.monotonic() < deadline:
+        if select.select([master], [], [], 0.1)[0]:
+            data += os.read(master, 65536)
+        if process.poll() is not None:
+            break
+    if needle not in data:
+        raise AssertionError(f"{needle!r} missing from {data.decode(errors='replace')}")
+
+
 @unittest.skipUnless(os.name == "posix", "Unix PTY coverage")
 class TestTerminal(unittest.TestCase):
+    def test_offline_demo_from_queue_to_evidence_in_a_terminal(self):
+        import pty
+        import tempfile
+        import termios
+
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        before = termios.tcgetattr(slave)
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(
+                os.environ,
+                PATH=tmp,
+                COLUMNS="80",
+                LINES="24",
+                PYTHONIOENCODING="utf-8",
+                DOCKTUI_CONFIG=os.path.join(tmp, "bad.json"),
+            )
+            with open(env["DOCKTUI_CONFIG"], "w") as config:
+                config.write("invalid configuration")
+            process = subprocess.Popen(
+                [sys.executable, "-m", "docktui", "demo"],
+                env=env,
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+            )
+            try:
+                expect_pty_output(process, master, b"checkout-worker-1")
+                os.write(master, b"\r")
+                expect_pty_output(process, master, b"Schema version 18 required")
+                os.write(master, b"\x1b")
+                expect_pty_output(process, master, b"Needs attention")
+                os.write(master, b"a")
+                expect_pty_output(process, master, b"checkout-seed-1")
+                os.write(master, b"?")
+                expect_pty_output(process, master, b"Keyboard help")
+                process.send_signal(signal.SIGINT)
+                self.assertEqual(wait_for_pty_exit(process, master), 0)
+                after = termios.tcgetattr(slave)
+                pending = getattr(termios, "PENDIN", 0)
+                before[3] &= ~pending
+                after[3] &= ~pending
+                self.assertEqual(after, before)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+
     def test_help_paging_and_registry_search_through_cli(self):
         import pty
-        import select
         import tempfile
 
         master, slave = pty.openpty()
@@ -43,14 +105,7 @@ class TestTerminal(unittest.TestCase):
             try:
 
                 def expect(needle):
-                    data = b""
-                    deadline = time.monotonic() + 6
-                    while needle not in data and time.monotonic() < deadline:
-                        if select.select([master], [], [], 0.1)[0]:
-                            data += os.read(master, 65536)
-                        if process.poll() is not None:
-                            break
-                    self.assertIn(needle, data, data.decode(errors="replace"))
+                    expect_pty_output(process, master, needle)
 
                 expect(b"Docker CLI not found")
                 os.write(master, b"?")

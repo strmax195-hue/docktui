@@ -632,12 +632,40 @@ class DockerClient:
             command.append(container_id)
         return command
 
-    def get_logs(self, container_id: str, tail: int = 40, **options) -> str:
+    def read_logs(
+        self,
+        container_id: Optional[str],
+        tail: int = 40,
+        *,
+        project_name: Optional[str] = None,
+        **options,
+    ) -> str:
+        """Read both Docker log streams in arrival order, distinguishing errors from empty logs."""
         if not self.is_docker_installed():
-            return "Docker not installed."
-        return self._capture(
-            self.logs_command(container_id, tail=tail, **options), action="reading logs"
-        )
+            raise DockerError("Docker not installed.")
+        cmd = self.logs_command(container_id, project_name, tail=tail, **options)
+        try:
+            result = self._run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=True,
+            )
+        except subprocess.TimeoutExpired as exc:
+            action = "reading Compose logs" if project_name else "reading logs"
+            raise DockerError(_format_timeout_message(self.timeout, action)) from exc
+        except (subprocess.CalledProcessError, OSError) as exc:
+            raise DockerError(self._error_message(exc)) from exc
+        return result.stdout or ""
+
+    def get_logs(self, container_id: str, tail: int = 40, **options) -> str:
+        try:
+            return self.read_logs(container_id, tail=tail, **options)
+        except DockerError as exc:
+            return str(exc)
 
     def get_compose_project_logs(self, project_name: str, tail: int = 40, **options) -> str:
         if not self.is_docker_installed():
@@ -654,10 +682,10 @@ class DockerClient:
                     for line in self.get_logs(row["id"], tail=tail, **options).splitlines()
                 )
             return "\n".join(output)
-        return self._capture(
-            self.logs_command(None, project_name, tail=tail, **options),
-            action="reading Compose logs",
-        )
+        try:
+            return self.read_logs(None, tail=tail, project_name=project_name, **options)
+        except DockerError as exc:
+            return str(exc)
 
     def inspect_container(self, container_id: str) -> str:
         if not self.is_docker_installed():
@@ -1015,6 +1043,10 @@ class DockerClient:
             "health_time": str(probe.get("End") or probe.get("Start") or "(none)"),
             "health_exit_code": str(probe.get("ExitCode", "(none)")),
             "health_output": str(probe.get("Output") or "(none)")[:4096],
+            "oom_killed": str(state.get("OOMKilled", "")).lower(),
+            "exit_code": str(state.get("ExitCode", "")),
+            "state_error": str(state.get("Error") or "")[:4096],
+            "restart_count": str(data.get("RestartCount", "")),
             "id": (data.get("Id") or "")[:12],
             "name": (data.get("Name") or "").lstrip("/"),
             "image": config.get("Image", ""),

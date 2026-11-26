@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from docktui.docker_client import DockerClient
+from docktui.triage import DockerSource, plain_report
 from docktui.tui import ContainerDashboard
 
 
@@ -21,7 +22,8 @@ class TestComposeIntegration(unittest.TestCase):
             (root / "Dockerfile").write_text('FROM busybox\nCMD ["sleep", "600"]\n')
             compose = root / "compose.yml"
             compose.write_text(
-                "services:\n  web:\n    build: .\n    command: sh -c 'echo window-probe; sleep 600'\n"
+                "services:\n  web:\n    build: .\n"
+                "    command: sh -c 'echo window-probe; echo stderr-probe >&2; sleep 600'\n"
             )
             try:
                 for action in ("up", "restart", "build"):
@@ -51,6 +53,11 @@ class TestComposeIntegration(unittest.TestCase):
                         break
                     time.sleep(0.1)
                 self.assertIn("window-probe", output)
+                self.assertIn("stderr-probe", output)
+                report, code = plain_report(DockerSource(client), selected["name"], False)
+                self.assertEqual(code, 0, report)
+                for expected in (f"Compose  {project} / web", "window-probe", "stderr-probe"):
+                    self.assertIn(expected, report)
                 self.assertEqual(client.get_compose_project_logs(project, until="1"), "")
                 success, message = client.run_compose_cmd(project, str(compose), "down")
                 self.assertTrue(success, message)

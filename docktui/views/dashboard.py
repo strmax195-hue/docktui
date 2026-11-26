@@ -41,6 +41,7 @@ class DashboardViews:
         if self.current_tab != "contexts" and not self.client.is_docker_installed():
             print(f"\n{palette.RED}{palette.BOLD}Error: Docker CLI not found.{palette.RESET}")
             print("Install the Docker CLI, then run 'docktui doctor' to check your setup.")
+            print("Try 'docktui demo' to investigate a sample incident offline.")
             print("\n[?] Help  [q] Quit")
             return
 
@@ -60,7 +61,7 @@ class DashboardViews:
                 if error:
                     print(error)
                 print("Run 'docktui doctor' to check the connection and permissions.")
-            print("\n[g] Retry  [6] Choose connection  [?] Help  [q] Quit")
+            print("\n[g] Retry  [6] Choose connection  [!] Triage  [?] Help  [q] Quit")
             return
 
         if error:
@@ -351,7 +352,7 @@ class DashboardViews:
 
     def _main_footer_hints(self: Any) -> str:
         hints = {
-            "containers": "[l] Logs | [v] Details | [s] Start/stop | [/] Filter",
+            "containers": "[l] Logs | [v] Details | [/] Filter",
             "compose": "[l] Logs | [s] Start/stop | [/] Filter",
             "images": "[f] Search & pull | [d] Delete | [/] Filter",
             "volumes": "[Shift+F] Browse files | [d] Delete | [/] Filter",
@@ -362,7 +363,7 @@ class DashboardViews:
         if self.current_tab == "compose" and self.compose_rows:
             if self.compose_rows[self.selected_compose_index]["type"] == "project":
                 current = "[u] Up | [d] Down | [b] Build | [l] Project logs"
-        return f"{current} | [?] All keys | [q] Quit"
+        return f"[!] Triage | {current} | [?] All keys | [q] Quit"
 
     def _draw_main_footer(self: Any) -> None:
         width = get_terminal_size().width

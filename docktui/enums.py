@@ -7,6 +7,7 @@ class ViewMode(str, Enum):
     """All possible dashboard views."""
 
     MAIN = "main"
+    TRIAGE = "triage"
     LOGS = "logs"
     INSPECT = "inspect"
     DETAILS = "details"

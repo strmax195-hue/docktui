@@ -19,16 +19,18 @@
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
 </p>
 
-**DockTUI** is a fast terminal dashboard for monitoring, debugging and managing Docker containers, Compose stacks, images, volumes and networks. It is pure Python standard library, drives the regular `docker` CLI, and therefore works anywhere Docker works: your laptop, a jump host, a production box over SSH, or a remote daemon via `DOCKER_HOST`.
+**Find out why a container is failing from your terminal.** DockTUI brings the health probe, exit status and recent logs together. The dashboard also manages containers, Compose stacks, images, volumes and networks using your existing Docker CLI and contexts.
+
+Try it with [uv](https://docs.astral.sh/uv/) on a machine with Git. The bundled incident runs offline after the initial download, even if Docker is absent.
+
+```bash
+uvx --from git+https://github.com/strmax195-hue/docktui.git docktui demo
+```
+
+Press **Enter** on `checkout-api-1` to see why its readiness probe returns HTTP 503. **Esc** returns to the list. On your own host, run `docktui triage` or press **!** in the dashboard.
 
 <p align="center">
-  <img src="assets/screenshot-dashboard.svg" alt="DockTUI dashboard: container list with health status and resource usage, live logs of shop-web-1 pinned underneath" width="100%">
-</p>
-
-It is also a **non-interactive tool for ops**: `docktui status` prints a snapshot, `docktui check` is a ready-made Nagios/Icinga/Zabbix/cron health check with proper exit codes, and `docktui doctor` tells you exactly why Docker isn't working.
-
-<p align="center">
-  <img src="assets/screenshot-cli.svg" alt="docktui status and docktui check output in a shell" width="100%">
+  <img src="assets/screenshot-triage.svg" alt="Offline incident showing a failed readiness probe and a log entry reporting that schema version 18 is required but version 17 is installed" width="800">
 </p>
 
 ---
@@ -38,6 +40,7 @@ It is also a **non-interactive tool for ops**: `docktui status` prints a snapsho
 - [Why admins like it](#why-admins-like-it)
 - [Install](#install)
 - [Quick start](#quick-start)
+- [Investigate a container](#investigate-a-container)
 - [Scripting & monitoring](#scripting--monitoring) — `status`, `check`, `doctor`
 - [Dashboard features](#dashboard-features)
 - [Configuration](#configuration)
@@ -50,14 +53,14 @@ It is also a **non-interactive tool for ops**: `docktui status` prints a snapsho
 
 - **Nothing to install on the server but Python.** No Go/Rust binary to ship, no Docker SDK, no TUI framework, no agent. `pipx install` and go — also on air-gapped hosts (copy one wheel).
 - **Uses your existing Docker setup.** DockTUI shells out to `docker`, so contexts, `DOCKER_HOST`, TLS certs, SSH keys, rootless Docker and group permissions all just work.
-- **Built for real hosts, not demos.** Scrollable lists for hundreds of containers, Compose-aware grouping, health status, crash/restart detection, bulk start/stop of a filtered set, and live logs pinned under the container list.
+- **Find a failing service quickly.** Open the incident list, select a container and read the last probe alongside its logs. The dashboard can also pin live logs under your container list.
 - **Scriptable.** JSON output, glob filters, and Nagios-compatible exit codes (`0` OK, `1` WARNING, `2` CRITICAL, `3` UNKNOWN).
 - **Safe by default.** Destructive actions (delete, prune, bulk stop) ask for confirmation; prune requires typing a keyword.
 - **Your shortcuts.** Bind `Ctrl+<letter>` to any command you run inside containers all day (`tail -f /var/log/app.log`, `env`, `df -h`).
 
 ## Install
 
-DockTUI needs Python 3.9+ and the Docker CLI. It has **zero runtime dependencies**.
+DockTUI needs Python 3.9+ and has **zero Python runtime dependencies**. Install from Git for `demo` and `triage`. Live operations also need the Docker CLI and access to a daemon.
 
 ```bash
 # Recommended: isolated install with pipx (or: uv tool install ...)
@@ -78,6 +81,7 @@ If `docktui` is not on your `PATH` (common on Windows), run `python -m docktui` 
 
 ```bash
 docktui doctor                 # check Docker CLI, daemon, permissions, compose, config, terminal
+docktui triage                 # find unhealthy, restarting or crashed containers
 docktui                        # open the dashboard
 docktui -H ssh://admin@prod-1  # dashboard for a remote daemon over SSH
 docktui status                 # one-shot table of containers, then exit
@@ -88,9 +92,34 @@ On the dashboard, press `/` to find a container, then `l` for its logs or `v` fo
 Press `?` for the shortcuts on your current screen. Use `PgUp` and `PgDn` to browse the guide,
 then `Esc` to return. For a pipe or CI job, use `docktui status --json` or `docktui check`.
 
+## Investigate a container
+
+Press **!** from any dashboard tab or start with `docktui triage`. The list puts critical findings first and groups all findings for a container on one row. It uses the health and exit rules from `docktui check` and skips resource sampling. A cleanly stopped job stays out of the incident list. A SIGKILL exit (137) is a warning. The evidence view shows whether Docker recorded an out-of-memory kill.
+
+| Key | Action |
+| --- | --- |
+| ↑ / ↓, PgUp / PgDn | Select a container or scroll its evidence |
+| Enter | Read the last health probe, restart count and up to 40 recent lines from stdout and stderr |
+| a | Toggle between incidents and all containers |
+| r | Refresh the list or reread the open container |
+| Esc / q | Go back one screen / leave triage |
+
+```bash
+docktui demo                            # same controls, six local sample containers
+docktui -H ssh://admin@prod-1 triage    # inspect a remote host
+docktui triage --all --plain            # print a snapshot and exit
+docktui triage checkout-api-1 > api.txt # write evidence for an exact name or short ID
+```
+
+Triage only reads Docker data. It prints plain text automatically in a pipe. An unavailable inventory or incomplete evidence report returns exit code 1. For monitoring exit codes based on incident severity, use `docktui check`.
+
 ## Scripting & monitoring
 
-All sub-commands accept `-H/--host`, `--docker-timeout` and `-c/--config`, and never need a TTY.
+Live commands accept `-H/--host`, `--docker-timeout` and `-c/--config`. The offline demo ignores Docker endpoints and local configuration.
+
+<p align="center">
+  <img src="assets/screenshot-cli.svg" alt="docktui status and docktui check output in a shell" width="100%">
+</p>
 
 ### `docktui status` — snapshot
 
@@ -163,6 +192,10 @@ docktui config show    # effective configuration as JSON (after CLI overrides)
 ```
 
 ## Dashboard features
+
+<p align="center">
+  <img src="assets/screenshot-dashboard.svg" alt="Container dashboard with health, resource usage and pinned logs for shop-web-1" width="100%">
+</p>
 
 <p align="center">
   <img src="assets/screenshot-compose.svg" alt="Compose tab grouping containers by project and service" width="100%">
@@ -249,6 +282,8 @@ docktui -H tcp://10.0.0.5:2376         # TLS; configure DOCKER_TLS_VERIFY / DOCK
 ## Keyboard reference
 
 ### Global Controls
+
+- **`!`** opens container triage from any resource tab.
 - **`Tab` or `1`-`6`**: Switch between **Containers**, **Compose**, **Images**, **Volumes**, **Networks**, and **Contexts** tabs.
 - **`↑` / `↓` (Arrow Keys) or Mouse Scroll Wheel**: Navigate list items and scroll text logs.
 - **`G`**: Force refresh data.

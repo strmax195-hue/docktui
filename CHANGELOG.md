@@ -4,6 +4,9 @@ All notable changes to DockTUI are documented here.
 
 ## Unreleased
 
+- Open container triage with `!` or `docktui triage`. The read-only incident list ranks health and exit findings and opens the selected container’s last probe, restart count and recent logs. Plain-text output also works over SSH and in pipes.
+- Try the same workflow without Docker using `docktui demo`, which includes a failed readiness probe, a restarting worker and an out-of-memory kill.
+- Container and Compose log snapshots retain both stdout and stderr in arrival order.
 - Compose preserves the selected service across refreshes and keeps its selection independent of the Containers tab. Resource actions wait for the new list when a filter changes.
 - Keyboard help opens on the current screen's shortcuts and fits a standard 80×24 terminal. Resource lists support page navigation, Home and End. Prompts accept the letter `q`, Unicode keyboard input on Windows and multi-line edits.
 - The registry picker allows repeated searches and displays loading, empty and error results. Image pulls follow the latest output and retain their completion status. The volume browser can navigate back from an empty directory and export a listing.

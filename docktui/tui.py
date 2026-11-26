@@ -75,10 +75,12 @@ from .terminal import (
     init_terminal,
     restore_terminal,
 )
+from .triage import DockerSource
 from .views.dashboard import DashboardViews
 from .views.dialogs import DialogsViews
 from .views.logs import LogsViews
 from .views.text import TextViews
+from .views.triage import TriageScreen
 
 _THEMED_NAMES = (
     "RESET",
@@ -176,6 +178,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.current_tab = self.tabs[0]
         self.view_mode = ViewMode.MAIN
         self.previous_view_mode = ViewMode.MAIN
+        self.triage_screen: Optional[TriageScreen] = None
         self.status_message = "Tab or 1–6 switches tabs. Press ? for keyboard help."
         self.status_time = time.time()
         self.last_refresh = 0.0
@@ -1489,6 +1492,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         self.refresh_data()
 
     def _reset_connection_state(self) -> None:
+        self._close_triage()
         self.jobs.cancel_all()
         self._view_requests.clear()
         self._logs_loaded = False
@@ -1624,6 +1628,8 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
     def _dispatch_view(self, view: ViewMode) -> None:
         if view == ViewMode.MAIN:
             self.draw_main_view()
+        elif view == ViewMode.TRIAGE and self.triage_screen:
+            self.triage_screen.draw()
         elif view == ViewMode.LOGS:
             self.draw_logs_view()
         elif view == ViewMode.INSPECT:
@@ -1799,7 +1805,26 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
 
     # ------------------------------------------------------------- key handling
 
+    def _close_triage(self) -> None:
+        if self.triage_screen:
+            self.triage_screen.close()
+            self.triage_screen = None
+            self.view_mode = ViewMode.MAIN
+
+    def _handle_key_triage(self, key: str) -> bool:
+        if self.triage_screen and not self.triage_screen.key(key):
+            self._close_triage()
+            self.request_refresh()
+        return True
+
     def _handle_key_main(self, key: str) -> bool:
+        if key == "!":
+            self.triage_screen = TriageScreen(
+                DockerSource(self.client, self.current_context or None), self.refresh_interval
+            )
+            self.view_mode = ViewMode.TRIAGE
+            self.need_redraw = True
+            return True
         if self._displayed and self.current_tab != "contexts" and not self._visible_snapshot_time():
             # The visible criteria can change while the old Docker rows still exist.
             # Never send a command to a resource from the previous filter or tab.
@@ -2513,6 +2538,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         # Per-view key dispatcher table.
         view_handlers = {
             ViewMode.MAIN: self._handle_key_main,
+            ViewMode.TRIAGE: self._handle_key_triage,
             ViewMode.LOGS: self._handle_key_logs,
             ViewMode.INSPECT: self._handle_key_inspect,
             ViewMode.DETAILS: self._handle_key_details,
@@ -2530,9 +2556,12 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
         try:
             while not self._quit_requested:
                 self._drain_ui()
+                if self.triage_screen and self.triage_screen.tick():
+                    self.need_redraw = True
                 if self.refresh_requested.is_set():
                     self.refresh_requested.clear()
-                    self._schedule_refresh()
+                    if self.view_mode != ViewMode.TRIAGE:
+                        self._schedule_refresh()
                 size = get_terminal_size()
                 self._viewport_h = viewport_height_for(size.height)
 
@@ -2573,7 +2602,13 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                 if (
                     key == "\x1b"
                     and self.view_mode
-                    not in (ViewMode.HELP, ViewMode.SEARCH, ViewMode.FILES, ViewMode.PULL_PROGRESS)
+                    not in (
+                        ViewMode.HELP,
+                        ViewMode.TRIAGE,
+                        ViewMode.SEARCH,
+                        ViewMode.FILES,
+                        ViewMode.PULL_PROGRESS,
+                    )
                     and self.jobs.cancel_foreground()
                 ):
                     self.set_status(
@@ -2597,6 +2632,7 @@ class ContainerDashboard(DashboardViews, LogsViews, TextViews, DialogsViews):
                 time.sleep(0.04)
         finally:
             self._running = False
+            self._close_triage()
             self.jobs.shutdown()
             self.stop_events()
             self.stop_log_stream()
