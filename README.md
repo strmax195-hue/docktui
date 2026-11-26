@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <b>The Docker dashboard for people who live in SSH sessions.</b><br>
-  A zero-dependency terminal UI <i>and</i> a scriptable health checker for Docker hosts.
+  <b>Find out why your Docker container keeps restarting.</b><br>
+  A keyboard-driven dashboard for Docker and Compose, on your laptop or over SSH.
 </p>
 
 <p align="center">
@@ -19,15 +19,15 @@
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
 </p>
 
-**Find out why a container is failing from your terminal.** DockTUI brings the health probe, exit status and recent logs together. The dashboard also manages containers, Compose stacks, images, volumes and networks using your existing Docker CLI and contexts.
+Press **!** to find unhealthy, restarting or crashed containers. Select one and press **Enter** to read its last health check, exit code and recent logs in one view. Pin live logs below the container list during a rollout, or run `docktui check` to catch failures in CI.
 
-Try it with [uv](https://docs.astral.sh/uv/) on a machine with Git. The bundled incident runs offline after the initial download, even if Docker is absent.
+**Try a sample incident without Docker.** Run this with [uv](https://docs.astral.sh/uv/) and Git. After the first download, the demo works offline.
 
 ```bash
 uvx --from git+https://github.com/strmax195-hue/docktui.git docktui demo
 ```
 
-Press **Enter** on `checkout-api-1` to see why its readiness probe returns HTTP 503. **Esc** returns to the list. On your own host, run `docktui triage` or press **!** in the dashboard.
+The demo’s checkout API is running, but its readiness probe returns HTTP 503. Press **Enter** on `checkout-api-1` and compare the database schema versions in its logs. To investigate your own host, run `docktui triage`.
 
 <p align="center">
   <img src="assets/screenshot-triage.svg" alt="Offline incident showing a failed readiness probe and a log entry reporting that schema version 18 is required but version 17 is installed" width="800">
